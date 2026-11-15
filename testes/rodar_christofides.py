@@ -2,12 +2,12 @@
 Roda o Christofides em todas as instâncias TSPLIB da pasta data/ e salva as
 métricas num CSV (parte da "base de dados com as métricas coletadas").
 
-Uso (a partir da raiz do projeto, onde fica a pasta data/):
-    python rodar_christofides.py
-    python rodar_christofides.py --reps 5 --memoria
-    python rodar_christofides.py --nmin 10 --nmax 75     # filtra por tamanho
-    python rodar_christofides.py --so-euc2d               # só EUC_2D
-    python rodar_christofides.py outra_pasta/ --saida outro.csv
+Uso (a partir da pasta implementacoes/; a pasta data/ fica em ../data):
+    python rodar_teste_christofides.py
+    python rodar_teste_christofides.py --reps 5 --memoria
+    python rodar_teste_christofides.py --nmin 10 --nmax 75     # filtra por tamanho
+    python rodar_teste_christofides.py --so-euc2d               # só EUC_2D
+    python rodar_teste_christofides.py outra_pasta/ --saida outro.csv
 
 Por padrão roda TODAS as instâncias .tsp / .tsp.gz da pasta, sem filtro de n.
 
@@ -23,6 +23,10 @@ import csv
 import os
 import statistics
 import sys
+
+# as implementações ficam em ../implementacoes
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "implementacoes"))
 
 from christofides import christofides
 from leitor_tsp import (ler_instancia, listar_instancias, custo_tour,
@@ -77,8 +81,8 @@ def avaliar(inst, reps, medir_memoria):
 
 def main():
     ap = argparse.ArgumentParser(description="Christofides nas instâncias TSPLIB")
-    ap.add_argument("pasta", nargs="?", default="..\data",
-                    help="pasta com os .tsp/.tsp.gz (padrão: data)")
+    ap.add_argument("pasta", nargs="?", default="../data",
+                    help="pasta com os .tsp/.tsp.gz (padrão: ../data)")
     ap.add_argument("--nmin", type=int, default=0)
     ap.add_argument("--nmax", type=int, default=10**9)
     ap.add_argument("--reps", type=int, default=5)
@@ -88,8 +92,8 @@ def main():
     args = ap.parse_args()
 
     if not os.path.isdir(args.pasta):
-        sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir da raiz do "
-                 f"projeto ou passe o caminho: python rodar_christofides.py caminho/")
+        sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
+                 f"implementacoes/ ou passe o caminho: python rodar_teste_christofides.py caminho/")
 
     caminhos = listar_instancias(args.pasta, args.nmin, args.nmax)
     if not caminhos:
