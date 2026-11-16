@@ -20,6 +20,7 @@ das execuções cronometradas, para o tracemalloc não inflar os tempos.
 
 import argparse
 import csv
+import gc
 import os
 import statistics
 import sys
@@ -36,7 +37,13 @@ ETAPAS = ["mst", "preordem", "total"]
 
 
 def avaliar(inst, reps, medir_memoria):
-    execucoes = [twice_around_the_tree(inst.D) for _ in range(reps)]
+    twice_around_the_tree(inst.D)  # aquecimento: descartado (caches, imports tardios, alocador)
+    gc.collect()
+    gc.disable()  # evita pausas do coletor de lixo dentro das medições
+    try:
+        execucoes = [twice_around_the_tree(inst.D) for _ in range(reps)]
+    finally:
+        gc.enable()
     tour, custo, st = execucoes[0]
 
     # auditoria do resultado: permutação válida e custo recalculado
@@ -61,17 +68,25 @@ def avaliar(inst, reps, medir_memoria):
         "n_folhas_mst": st["n_folhas_mst"],
         "pares_violam_triangular": nviol,
         "maior_violacao_triangular": vmax,
+        # a garantia da aula 13 exige que D seja métrica; violações de 1 unidade
+        # vêm só do arredondamento da TSPLIB (nint)
+        "classe_metrica": ("metrica" if nviol == 0 else
+                           "arredondamento" if vmax <= 1 else "nao_metrica"),
     }
     if inst.otimo:
         razao = custo / inst.otimo
         linha["razao"] = round(razao, 6)
         linha["gap_pct"] = round(100 * (razao - 1), 4)
-        linha["dentro_garantia_2"] = razao < 2
+        linha["razao_abaixo_2"] = razao <= 2
     else:
-        linha["razao"] = linha["gap_pct"] = linha["dentro_garantia_2"] = "NA"
+        linha["razao"] = linha["gap_pct"] = linha["razao_abaixo_2"] = "NA"
 
     for e in ETAPAS:
-        linha[f"tempo_{e}_s"] = statistics.median(s[f"tempo_{e}"] for _, _, s in execucoes)
+        amostras = [s[f"tempo_{e}"] for _, _, s in execucoes]
+        linha[f"tempo_{e}_s"] = statistics.median(amostras)
+        if len(amostras) >= 2:
+            q1, _, q3 = statistics.quantiles(amostras, n=4)
+            linha[f"tempo_{e}_iqr_s"] = q3 - q1  # dispersão: detecta medições ruidosas
 
     if medir_memoria:
         _, _, sm = twice_around_the_tree(inst.D, medir_memoria=True)
@@ -90,8 +105,11 @@ def main():
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--memoria", action="store_true")
     ap.add_argument("--so-euc2d", action="store_true")
-    ap.add_argument("--saida", default="resultados_twice.csv")
+    ap.add_argument("--saida", default=None,
+                    help="padrão: resultados_twice.csv (ou resultados_twice_memoria.csv com --memoria)")
     args = ap.parse_args()
+    if args.saida is None:
+        args.saida = "resultados_twice_memoria.csv" if args.memoria else "resultados_twice.csv"
 
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "

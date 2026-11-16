@@ -23,18 +23,6 @@ from contextlib import contextmanager
 import numpy as np
 import networkx as nx
 
-
-# ---------------------------------------------------------------------------
-# Utilitário: matriz de distâncias no padrão TSPLIB (EUC_2D)
-# ---------------------------------------------------------------------------
-def matriz_euc2d(coords):
-    """d(i,j) = nint(sqrt(dx^2 + dy^2)), como define a TSPLIB para EUC_2D.
-    O arredondamento importa: os ótimos publicados usam distâncias inteiras."""
-    coords = np.asarray(coords, dtype=np.float64)
-    diff = coords[:, None, :] - coords[None, :, :]
-    return np.floor(np.sqrt((diff ** 2).sum(axis=2)) + 0.5).astype(np.int64)
-
-
 # ---------------------------------------------------------------------------
 # Passo 1: árvore geradora mínima (Prim com vetor, O(n^2))
 # ---------------------------------------------------------------------------
@@ -249,54 +237,3 @@ def christofides(D, inicio=0, medir_memoria=False):
     })
     return tour, custo, med.stats
 
-
-# ---------------------------------------------------------------------------
-# Verificações
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    from itertools import permutations
-
-    # Exemplo do slide (mesmo grafo do twice-around-the-tree), a..e -> 0..4
-    nomes = "abcde"
-    pesos = {("a", "b"): 4, ("a", "c"): 8, ("a", "d"): 9, ("a", "e"): 12,
-             ("b", "c"): 6, ("b", "d"): 8, ("b", "e"): 9,
-             ("c", "d"): 10, ("c", "e"): 11, ("d", "e"): 7}
-    D = np.zeros((5, 5), dtype=np.int64)
-    for (x, y), w in pesos.items():
-        i, j = nomes.index(x), nomes.index(y)
-        D[i, j] = D[j, i] = w
-
-    T = prim_mst(D)
-    I, _ = vertices_grau_impar(5, T)
-    M = matching_perfeito_minimo(D, I)
-    tour, custo, st = christofides(D)
-    print("Exemplo do slide")
-    print("  T  =", [nomes[u] + "-" + nomes[v] for u, v in T], "custo", st["custo_mst"])
-    print("  I  =", [nomes[v] for v in I])
-    print("  M  =", [nomes[u] + "-" + nomes[v] for u, v in M], "custo", st["custo_matching"])
-    print("  H  =", "-".join(nomes[v] for v in tour + [tour[0]]), "custo", custo)
-
-    def otimo_forca_bruta(D):
-        n = D.shape[0]
-        return min(custo_tour(D, [0, *p]) for p in permutations(range(1, n)))
-
-    # Instâncias euclidianas aleatórias: tour válido e razão <= 1.5
-    rng = np.random.default_rng(0)
-    pior = 1.0
-    for n in range(4, 10):
-        for _ in range(30):
-            D = matriz_euc2d(rng.uniform(0, 1000, size=(n, 2)))
-            tour, custo, _ = christofides(D)
-            assert sorted(tour) == list(range(n))
-            opt = otimo_forca_bruta(D)
-            pior = max(pior, custo / opt)
-    print(f"\n180 instâncias aleatórias (n=4..9): pior razão custo/ótimo = {pior:.4f}")
-
-    # Profiling por sub-rotina numa instância maior
-    D = matriz_euc2d(rng.uniform(0, 1000, size=(75, 2)))
-    _, _, st = christofides(D)
-    print("\nn=75, tempos (ms):",
-          {k[6:]: round(v * 1e3, 3) for k, v in st.items() if k.startswith("tempo_")})
-    _, _, st = christofides(D, medir_memoria=True)
-    print("n=75, pico de memória (KiB):",
-          {k[9:]: round(v / 1024, 1) for k, v in st.items() if k.startswith("mem_pico_")})

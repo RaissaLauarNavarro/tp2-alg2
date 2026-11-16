@@ -145,12 +145,13 @@ def main():
     ap.add_argument("--so-euc2d", action="store_true")
     ap.add_argument("--memoria", action="store_true")
     ap.add_argument("--saida", default=None,
-                    help="padrão: resultados_bnb_<inicial>_<estrategia>.csv")
+                    help="padrão: resultados_bnb_<inicial>_<estrategia>[_memoria].csv")
     ap.add_argument("--continuar", action="store_true",
                     help="acrescenta ao CSV existente, pulando instâncias já feitas")
     args = ap.parse_args()
 
-    saida = args.saida or f"resultados_bnb_{args.inicial}_{args.estrategia}.csv"
+    sufixo = "_memoria" if args.memoria else ""
+    saida = args.saida or f"resultados_bnb_{args.inicial}_{args.estrategia}{sufixo}.csv"
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
                  f"implementacoes/ ou passe o caminho: python rodar_teste_bnb.py caminho/")
