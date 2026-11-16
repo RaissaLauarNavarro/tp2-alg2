@@ -18,10 +18,13 @@ serve para qualquer tipo de instância, desde que D seja uma métrica.
 
 import time
 import tracemalloc
-from contextlib import contextmanager
 
 import numpy as np
 import networkx as nx
+
+from Medidor import Medidor
+from utils import custo_tour, custo_arestas
+
 
 # ---------------------------------------------------------------------------
 # Passo 1: árvore geradora mínima (Prim com vetor, O(n^2))
@@ -153,36 +156,6 @@ def atalhar(circuito, n):
     return tour  # o retorno tour[-1] -> tour[0] fica implícito
 
 
-def custo_tour(D, tour):
-    t = np.asarray(tour)
-    return D[t, np.roll(t, -1)].sum().item()
-
-
-def custo_arestas(D, arestas):
-    return sum(D[u, v].item() for u, v in arestas)
-
-
-# ---------------------------------------------------------------------------
-# Instrumentação por sub-rotina
-# ---------------------------------------------------------------------------
-class _Medidor:
-    def __init__(self, medir_memoria):
-        self.medir_memoria = medir_memoria
-        self.stats = {}
-
-    @contextmanager
-    def etapa(self, nome):
-        if self.medir_memoria:
-            base, _ = tracemalloc.get_traced_memory()
-            tracemalloc.reset_peak()
-        t0 = time.perf_counter()
-        yield
-        self.stats[f"tempo_{nome}"] = time.perf_counter() - t0
-        if self.medir_memoria:
-            _, pico = tracemalloc.get_traced_memory()
-            self.stats[f"mem_pico_{nome}"] = pico - base   # bytes acima da base
-
-
 # ---------------------------------------------------------------------------
 # Algoritmo completo
 # ---------------------------------------------------------------------------
@@ -201,7 +174,7 @@ def christofides(D, inicio=0, medir_memoria=False):
     ligou_aqui = medir_memoria and not tracemalloc.is_tracing()
     if ligou_aqui:
         tracemalloc.start()
-    med = _Medidor(medir_memoria)
+    med = Medidor(medir_memoria)
     t_total = time.perf_counter()
 
     try:
@@ -236,4 +209,3 @@ def christofides(D, inicio=0, medir_memoria=False):
         "custo_tour": custo,
     })
     return tour, custo, med.stats
-

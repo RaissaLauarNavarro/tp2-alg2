@@ -23,9 +23,9 @@ import tracemalloc
 
 import numpy as np
 
-# Mesma AGM, mesmas funções de custo e mesma instrumentação do Christofides,
-# para que tempos, memória e custos dos dois algoritmos sejam comparáveis.
-from christofides import prim_mst, custo_tour, custo_arestas, _Medidor
+from christofides import prim_mst
+from Medidor import Medidor
+from utils import custo_tour, custo_arestas
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +100,7 @@ def twice_around_the_tree(D, inicio=0, medir_memoria=False):
     ligou_aqui = medir_memoria and not tracemalloc.is_tracing()
     if ligou_aqui:
         tracemalloc.start()
-    med = _Medidor(medir_memoria)
+    med = Medidor(medir_memoria)
     t_total = time.perf_counter()
 
     try:
@@ -139,7 +139,8 @@ def twice_around_the_tree(D, inicio=0, medir_memoria=False):
 if __name__ == "__main__":
     from itertools import permutations
 
-    from christofides import atalhar, matriz_euc2d
+    from christofides import atalhar
+    from utils import matriz_euc2d
 
     # Exemplo do slide (mesmo grafo usado no Christofides), a..e -> 0..4
     nomes = "abcde"

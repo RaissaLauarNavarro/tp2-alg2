@@ -29,7 +29,8 @@ import tracemalloc
 
 import numpy as np
 
-from christofides import custo_tour, _Medidor
+from Medidor import Medidor
+from utils import custo_tour
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ def vizinho_mais_proximo(D, inicio=0, medir_memoria=False):
     ligou_aqui = medir_memoria and not tracemalloc.is_tracing()
     if ligou_aqui:
         tracemalloc.start()
-    med = _Medidor(medir_memoria)
+    med = Medidor(medir_memoria)
     t_total = time.perf_counter()
     try:
         with med.etapa("guloso"):
@@ -116,7 +117,7 @@ if __name__ == "__main__":
     import sys
     from itertools import permutations
 
-    from christofides import matriz_euc2d
+    from utils import matriz_euc2d
 
     # Exemplo do slide (mesmo grafo dos outros algoritmos), a..e -> 0..4
     nomes = "abcde"

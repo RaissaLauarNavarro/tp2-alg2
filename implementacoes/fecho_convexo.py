@@ -40,7 +40,8 @@ import tracemalloc
 
 import numpy as np
 
-from christofides import custo_tour, _Medidor
+from Medidor import Medidor
+from utils import custo_tour
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +187,7 @@ def fecho_convexo_insercao(D, pontos, criterio="custo", medir_memoria=False):
     ligou_aqui = medir_memoria and not tracemalloc.is_tracing()
     if ligou_aqui:
         tracemalloc.start()
-    med = _Medidor(medir_memoria)
+    med = Medidor(medir_memoria)
     t_total = time.perf_counter()
     try:
         with med.etapa("fecho"):
@@ -225,7 +226,7 @@ if __name__ == "__main__":
 
     from scipy.spatial import ConvexHull
 
-    from christofides import matriz_euc2d
+    from utils import matriz_euc2d
 
     rng = np.random.default_rng(0)
 

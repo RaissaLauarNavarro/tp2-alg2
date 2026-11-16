@@ -2,12 +2,12 @@
 Roda o Branch-and-Bound em todas as instâncias TSPLIB da pasta data/ e salva as
 métricas num CSV (parte da "base de dados com as métricas coletadas").
 
-Uso (a partir da pasta implementacoes/; a pasta data/ fica em ../data):
-    python rodar_teste_bnb.py                                # cold start, DFS, 30 min
-    python rodar_teste_bnb.py --estrategia melhor            # best-first
-    python rodar_teste_bnb.py --nmax 40 --limite 1800
-    python rodar_teste_bnb.py --continuar                    # retoma um CSV parcial
-    python rodar_teste_bnb.py outra_pasta/ --saida outro.csv
+Uso (a partir da pasta testes/; a pasta data/ fica em ../data e resultados em ../resultados):
+    python rodar_bnb.py                                      # cold start, DFS, 30 min
+    python rodar_bnb.py --estrategia melhor                  # best-first
+    python rodar_bnb.py --nmax 40 --limite 1800
+    python rodar_bnb.py --continuar                          # retoma um CSV parcial
+    python rodar_bnb.py outra_pasta/ --saida ../resultados/outro.csv
 
 Inicialização do limite superior (--inicial):
     trivial       1 -> 2 -> ... -> n -> 1 (cold start)
@@ -36,16 +36,21 @@ import os
 import sys
 import time
 
-# as implementações ficam em ../implementacoes
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "implementacoes"))
+RAIZ_PROJETO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PASTA_DATA_PADRAO = os.path.join(RAIZ_PROJETO, "data")
+PASTA_RESULTADOS_PADRAO = os.path.join(RAIZ_PROJETO, "resultados")
 
-from bnb_trivial import branch_and_bound, solucao_trivial
-from christofides import christofides
-from bnb_fechoc import tour_fecho_convexo
-from leitor_tsp import ler_instancia, listar_instancias, custo_tour
-from twice_around import twice_around_the_tree
+# as implementações ficam em ../implementacoes
+sys.path.insert(0, os.path.join(RAIZ_PROJETO, "implementacoes"))
+
+from bnb import branch_and_bound
 from bnb_guloso import tour_vizinho_mais_proximo
+from christofides import christofides
+from fecho_convexo import tour_fecho_convexo
+from leitor_tsp import ler_instancia, listar_instancias
+from solucao_trivial import solucao_trivial
+from twice_around import twice_around_the_tree
+from utils import custo_tour
 
 # nome -> função Instancia -> tour. Para adicionar um warm-start, registre aqui.
 # Recebe a instância inteira (e não só D) porque o fecho convexo usa coordenadas.
@@ -131,7 +136,7 @@ def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria):
 
 def main():
     ap = argparse.ArgumentParser(description="Branch-and-Bound nas instâncias TSPLIB")
-    ap.add_argument("pasta", nargs="?", default="../data",
+    ap.add_argument("pasta", nargs="?", default=PASTA_DATA_PADRAO,
                     help="pasta com os .tsp/.tsp.gz (padrão: ../data)")
     ap.add_argument("--inicial", choices=sorted(INICIALIZACOES), default="trivial")
     ap.add_argument("--estrategia", choices=["profundidade", "melhor"],
@@ -145,20 +150,25 @@ def main():
     ap.add_argument("--so-euc2d", action="store_true")
     ap.add_argument("--memoria", action="store_true")
     ap.add_argument("--saida", default=None,
-                    help="padrão: resultados_bnb_<inicial>_<estrategia>[_memoria].csv")
+                    help="padrão: ../resultados/resultados_bnb_<inicial>_<estrategia>[_memoria].csv")
     ap.add_argument("--continuar", action="store_true",
                     help="acrescenta ao CSV existente, pulando instâncias já feitas")
     args = ap.parse_args()
 
     sufixo = "_memoria" if args.memoria else ""
-    saida = args.saida or f"resultados_bnb_{args.inicial}_{args.estrategia}{sufixo}.csv"
+    nome_arquivo = f"resultados_bnb_{args.inicial}_{args.estrategia}{sufixo}.csv"
+    saida = args.saida or os.path.join(PASTA_RESULTADOS_PADRAO, nome_arquivo)
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
-                 f"implementacoes/ ou passe o caminho: python rodar_teste_bnb.py caminho/")
+                 f"testes/ ou passe o caminho: python rodar_bnb.py caminho/")
 
     caminhos = listar_instancias(args.pasta, args.nmin, args.nmax)
     if not caminhos:
         sys.exit(f"Nenhum .tsp ou .tsp.gz em '{args.pasta}' com {args.nmin} <= n <= {args.nmax}.")
+
+    pasta_saida = os.path.dirname(os.path.abspath(saida))
+    if pasta_saida:
+        os.makedirs(pasta_saida, exist_ok=True)
 
     feitas = set()
     if args.continuar and os.path.exists(saida):
@@ -202,7 +212,7 @@ def main():
 
     for arq, motivo in puladas:
         print(f"PULADA {arq}: {motivo}")
-    print(f"\nResultados em {saida}")
+    print(f"Resultados em {saida}")
 
 
 if __name__ == "__main__":

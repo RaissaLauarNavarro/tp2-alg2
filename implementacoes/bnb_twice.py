@@ -3,11 +3,11 @@ Roda o Branch-and-Bound em todas as instâncias TSPLIB da pasta data/ e salva as
 métricas num CSV (parte da "base de dados com as métricas coletadas").
 
 Uso (a partir da pasta implementacoes/; a pasta data/ fica em ../data):
-    python rodar_teste_bnb.py                                # cold start, DFS, 30 min
-    python rodar_teste_bnb.py --estrategia melhor            # best-first
-    python rodar_teste_bnb.py --nmax 40 --limite 1800
-    python rodar_teste_bnb.py --continuar                    # retoma um CSV parcial
-    python rodar_teste_bnb.py outra_pasta/ --saida outro.csv
+    python bnb_twice.py                                      # cold start, DFS, 30 min
+    python bnb_twice.py --estrategia melhor                  # best-first
+    python bnb_twice.py --nmax 40 --limite 1800
+    python bnb_twice.py --continuar                          # retoma um CSV parcial
+    python bnb_twice.py outra_pasta/ --saida outro.csv
 
 Inicialização do limite superior (--inicial):
     trivial       1 -> 2 -> ... -> n -> 1 (cold start)
@@ -31,17 +31,18 @@ rodada separada.
 
 import argparse
 import csv
-import json
 import os
 import sys
 import time
 
-from bnb_trivial import branch_and_bound, solucao_trivial
-from christofides import christofides
-from bnb_fechoc import tour_fecho_convexo
-from leitor_tsp import ler_instancia, listar_instancias, custo_tour
-from twice_around import twice_around_the_tree
+from bnb import branch_and_bound
 from bnb_guloso import tour_vizinho_mais_proximo
+from christofides import christofides
+from fecho_convexo import tour_fecho_convexo
+from leitor_tsp import ler_instancia, listar_instancias
+from solucao_trivial import solucao_trivial
+from twice_around import twice_around_the_tree
+from utils import custo_tour
 
 # nome -> função Instancia -> tour. Para adicionar um warm-start, registre aqui.
 # Recebe a instância inteira (e não só D) porque o fecho convexo usa coordenadas.
@@ -62,7 +63,7 @@ CAMPOS = [
     "folhas", "melhorias_ub", "prof_max", "max_fila",
     "tempo_inicializacao_s", "tempo_preprocessamento_s", "tempo_busca_s",
     "tempo_total_s", "tempo_decorrido_s", "tempo_ate_melhor_s", "nos_por_s",
-    "mem_pico_bytes", "trajetoria_ub",
+    "mem_pico_bytes",
 ]
 
 
@@ -120,8 +121,6 @@ def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria):
         "tempo_ate_melhor_s": r.get("tempo_ate_melhor", 0),
         "nos_por_s": round(r.get("nos_por_s", 0), 1),
         "mem_pico_bytes": r["mem_pico"] if r.get("mem_pico") is not None else "NA",
-        # JSON: [[nós expandidos, segundos, custo], ...] a cada melhoria do UB
-        "trajetoria_ub": json.dumps(r.get("trajetoria_ub", [])),
     }
 
 
@@ -150,7 +149,7 @@ def main():
     saida = args.saida or f"resultados_bnb_{args.inicial}_{args.estrategia}{sufixo}.csv"
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
-                 f"implementacoes/ ou passe o caminho: python rodar_teste_bnb.py caminho/")
+                 f"implementacoes/ ou passe o caminho: python bnb_twice.py caminho/")
 
     caminhos = listar_instancias(args.pasta, args.nmin, args.nmax)
     if not caminhos:

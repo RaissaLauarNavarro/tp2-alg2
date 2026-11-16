@@ -2,12 +2,12 @@
 Roda o Twice-around-the-tree em todas as instâncias TSPLIB da pasta data/ e
 salva as métricas num CSV (parte da "base de dados com as métricas coletadas").
 
-Uso (a partir da pasta implementacoes/; a pasta data/ fica em ../data):
-    python rodar_teste_twice.py
-    python rodar_teste_twice.py --reps 5 --memoria
-    python rodar_teste_twice.py --nmin 10 --nmax 75     # filtra por tamanho
-    python rodar_teste_twice.py --so-euc2d               # só EUC_2D
-    python rodar_teste_twice.py outra_pasta/ --saida outro.csv
+Uso (a partir da pasta testes/; a pasta data/ fica em ../data e resultados em ../resultados):
+    python rodar_twice.py
+    python rodar_twice.py --reps 5 --memoria
+    python rodar_twice.py --nmin 10 --nmax 75     # filtra por tamanho
+    python rodar_twice.py --so-euc2d               # só EUC_2D
+    python rodar_twice.py outra_pasta/ --saida ../resultados/outro.csv
 
 Por padrão roda TODAS as instâncias .tsp / .tsp.gz da pasta, sem filtro de n.
 
@@ -25,13 +25,17 @@ import os
 import statistics
 import sys
 
+RAIZ_PROJETO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PASTA_DATA_PADRAO = os.path.join(RAIZ_PROJETO, "data")
+PASTA_RESULTADOS_PADRAO = os.path.join(RAIZ_PROJETO, "resultados")
+
 # as implementações ficam em ../implementacoes
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "implementacoes"))
+sys.path.insert(0, os.path.join(RAIZ_PROJETO, "implementacoes"))
 
 from twice_around import twice_around_the_tree
-from leitor_tsp import (ler_instancia, listar_instancias, custo_tour,
+from leitor_tsp import (ler_instancia, listar_instancias,
                         violacoes_desigualdade_triangular)
+from utils import custo_tour
 
 ETAPAS = ["mst", "preordem", "total"]
 
@@ -98,7 +102,7 @@ def avaliar(inst, reps, medir_memoria):
 
 def main():
     ap = argparse.ArgumentParser(description="Twice-around-the-tree nas instâncias TSPLIB")
-    ap.add_argument("pasta", nargs="?", default="../data",
+    ap.add_argument("pasta", nargs="?", default=PASTA_DATA_PADRAO,
                     help="pasta com os .tsp/.tsp.gz (padrão: ../data)")
     ap.add_argument("--nmin", type=int, default=0)
     ap.add_argument("--nmax", type=int, default=10**9)
@@ -106,14 +110,16 @@ def main():
     ap.add_argument("--memoria", action="store_true")
     ap.add_argument("--so-euc2d", action="store_true")
     ap.add_argument("--saida", default=None,
-                    help="padrão: resultados_twice.csv (ou resultados_twice_memoria.csv com --memoria)")
+                    help="padrão: ../resultados/resultados_twice[_memoria].csv")
     args = ap.parse_args()
     if args.saida is None:
-        args.saida = "resultados_twice_memoria.csv" if args.memoria else "resultados_twice.csv"
+        nome_arquivo = ("resultados_twice_memoria.csv" if args.memoria
+                        else "resultados_twice.csv")
+        args.saida = os.path.join(PASTA_RESULTADOS_PADRAO, nome_arquivo)
 
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
-                 f"implementacoes/ ou passe o caminho: python rodar_teste_twice.py caminho/")
+                 f"testes/ ou passe o caminho: python rodar_twice.py caminho/")
 
     caminhos = listar_instancias(args.pasta, args.nmin, args.nmax)
     if not caminhos:
@@ -145,11 +151,14 @@ def main():
         print(f"PULADA {arq}: {motivo}")
 
     if linhas:
+        pasta_saida = os.path.dirname(os.path.abspath(args.saida))
+        if pasta_saida:
+            os.makedirs(pasta_saida, exist_ok=True)
         with open(args.saida, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(linhas[0].keys()))
             w.writeheader()
             w.writerows(linhas)
-        print(f"\n{len(linhas)} instâncias -> {args.saida}")
+        print(f"{len(linhas)} instâncias -> {args.saida}")
 
 
 if __name__ == "__main__":

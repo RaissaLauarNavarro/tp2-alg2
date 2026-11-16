@@ -48,20 +48,13 @@ import tracemalloc
 
 import numpy as np
 
-from christofides import custo_tour
+from solucao_trivial import solucao_trivial
+from utils import custo_tour
 
 
 class _Interrompido(Exception):
     def __init__(self, status):
         self.status = status
-
-
-# ---------------------------------------------------------------------------
-# Inicialização (limite superior)
-# ---------------------------------------------------------------------------
-def solucao_trivial(D):
-    """Cold start: 1 -> 2 -> ... -> n -> 1 (0-based: 0 -> 1 -> ... -> n-1 -> 0)."""
-    return list(range(D.shape[0]))
 
 
 # ---------------------------------------------------------------------------
@@ -137,8 +130,7 @@ class _Busca:
 
             # lb incremental: só mudam as parcelas de u e v
             if k == 1:   # u é a origem, ainda sem aresta forçada
-                S2 = S - self.base[u] + w + self._alt(u, v) \
-                       - self.base[v] + w + self._alt(v, u)
+                S2 = S - self.base[u] + w + self._alt(u, v)                        - self.base[v] + w + self._alt(v, u)
             else:        # u deixa de ser extremidade e vira vértice interno
                 S2 = S - self._alt(u, p) + w - self.base[v] + w + self._alt(v, u)
             custo2 = custo + w
@@ -310,7 +302,7 @@ def branch_and_bound(D, tour_inicial=None, estrategia="profundidade",
 if __name__ == "__main__":
     from itertools import permutations
 
-    from christofides import matriz_euc2d
+    from utils import matriz_euc2d
 
     def otimo_forca_bruta(D):
         n = D.shape[0]
