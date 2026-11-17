@@ -3,11 +3,11 @@ Roda o Branch-and-Bound em todas as instâncias TSPLIB da pasta data/ e salva as
 métricas num CSV (parte da "base de dados com as métricas coletadas").
 
 Uso (a partir da pasta implementacoes/; a pasta data/ fica em ../data):
-    python bnb_twice.py                                      # cold start, DFS, 30 min
-    python bnb_twice.py --estrategia melhor                  # best-first
-    python bnb_twice.py --nmax 40 --limite 1800
-    python bnb_twice.py --continuar                          # retoma um CSV parcial
-    python bnb_twice.py outra_pasta/ --saida outro.csv
+    python avaliar_bnb.py                                      # cold start, DFS, 30 min
+    python avaliar_bnb.py --estrategia melhor                  # best-first
+    python avaliar_bnb.py --nmax 40 --limite 1800
+    python avaliar_bnb.py --continuar                          # retoma um CSV parcial
+    python avaliar_bnb.py outra_pasta/ --saida outro.csv
 
 Inicialização do limite superior (--inicial):
     trivial       1 -> 2 -> ... -> n -> 1 (cold start)
@@ -149,7 +149,7 @@ def main():
     saida = args.saida or f"resultados_bnb_{args.inicial}_{args.estrategia}{sufixo}.csv"
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
-                 f"implementacoes/ ou passe o caminho: python bnb_twice.py caminho/")
+                 f"implementacoes/ ou passe o caminho: python avaliar_bnb.py caminho/")
 
     caminhos = listar_instancias(args.pasta, args.nmin, args.nmax)
     if not caminhos:
@@ -197,7 +197,7 @@ def main():
 
     for arq, motivo in puladas:
         print(f"PULADA {arq}: {motivo}")
-    print(f"\nResultados em {saida}")
+    print(f"Resultados em {saida}")
 
 
 if __name__ == "__main__":

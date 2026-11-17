@@ -143,7 +143,7 @@ def main():
                     default="profundidade")
     ap.add_argument("--limite", type=float, default=1800.0,
                     help="segundos por instância (padrão: 1800 = 30 min)")
-    ap.add_argument("--max-fila", type=int, default=2_000_000,
+    ap.add_argument("--max-fila", type=int, default=160_000_000,
                     help="só best-first: nós na fila antes de abortar (~0,9 GB)")
     ap.add_argument("--nmin", type=int, default=0)
     ap.add_argument("--nmax", type=int, default=10**9)

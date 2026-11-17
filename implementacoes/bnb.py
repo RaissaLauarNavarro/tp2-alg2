@@ -34,14 +34,15 @@ Estratégias
       ordem crescente de lb. Memória O(n^2) no pior caso (lista de filhos por
       nível), independente do tamanho da árvore.
   "melhor": best-first com heap pelo lb (desempate pelo nó mais profundo).
-      Cada nó guarda o seu próprio caminho, então a memória cresce com a
-      fronteira da busca; `max_fila` interrompe antes de esgotar a RAM
-      (medido: 3 milhões de nós na fila ocupam ~1,3 GB, com n = 24).
+      Os estados dos nós são armazenados em arrays planos (array/bytearray)
+      com bitmask de visitados, e a heap guarda apenas chaves inteiras
+      empacotadas, além de purgar nós obsoletos quando UB melhora.
 
 Entrada: matriz de distâncias D (numpy n x n, simétrica, inteira), a mesma
 que o leitor_tsp.py devolve.
 """
 
+from array import array
 import heapq
 import time
 import tracemalloc
@@ -98,21 +99,22 @@ class _Busca:
                       podados_simetria=0, folhas=0, melhorias_ub=0,
                       prof_max=1, max_fila=1)
         self.tempo_ate_melhor = 0.0
+        self._ao_melhorar_ub = None
 
     # menor aresta de v que não seja a aresta para x
     def _alt(self, v, x):
         return self.m2[v] if self.viz1[v] == x else self.m1[v]
 
-    def _filhos(self, caminho_ultimos, k, S, custo, cont, p1, visitado):
+    def _filhos(self, caminho_ultimos, k, S, custo, cont, p1, visitado, usar_mask=False):
         """Gera os filhos de um nó. caminho_ultimos = (penúltimo, último).
-        Devolve [(lb, v, S2, custo2, cont2)] só dos que sobrevivem à poda.
+        Devolve [(lb, v, S2, custo2, cont2, p1v)] só dos que sobrevivem à poda.
         Folhas (k + 1 == n) são fechadas aqui mesmo e atualizam o UB."""
         n, Dl, c = self.n, self.Dl, self.c
         p, u = caminho_ultimos
         saida = []
         restantes = n - k - 1                  # não visitados depois do filho
         for v in range(1, n):
-            if visitado[v]:
+            if (visitado & (1 << v)) if usar_mask else visitado[v]:
                 continue
             c["gerados"] += 1
             w = Dl[u][v]
@@ -130,7 +132,8 @@ class _Busca:
 
             # lb incremental: só mudam as parcelas de u e v
             if k == 1:   # u é a origem, ainda sem aresta forçada
-                S2 = S - self.base[u] + w + self._alt(u, v)                        - self.base[v] + w + self._alt(v, u)
+                S2 = S - self.base[u] + w + self._alt(u, v) \
+                       - self.base[v] + w + self._alt(v, u)
             else:        # u deixa de ser extremidade e vira vértice interno
                 S2 = S - self._alt(u, p) + w - self.base[v] + w + self._alt(v, u)
             custo2 = custo + w
@@ -154,6 +157,8 @@ class _Busca:
         self.tour_ub = self._caminho_atual() + [ultimo]
         self.c["melhorias_ub"] += 1
         self.tempo_ate_melhor = time.perf_counter() - self.t0
+        if self._ao_melhorar_ub is not None:
+            self._ao_melhorar_ub()
 
     def _checar_tempo(self):
         if self.c["expandidos"] & 1023 == 0 and time.perf_counter() > self.prazo:
@@ -177,7 +182,7 @@ class _Busca:
         if k > c["prof_max"]:
             c["prof_max"] = k
         ultimos = (caminho[-2] if k > 1 else -1, caminho[-1])
-        filhos = self._filhos(ultimos, k, S, custo, cont, p1, visitado)
+        filhos = self._filhos(ultimos, k, S, custo, cont, p1, visitado, usar_mask=False)
         filhos.sort()                          # menor lb primeiro
         for lb, v, S2, custo2, cont2, p1v in filhos:
             if lb >= self.ub:                  # UB pode ter melhorado no irmão
@@ -189,35 +194,127 @@ class _Busca:
             caminho.pop()
             visitado[v] = False
 
-    # ---------------- melhor primeiro ----------------
+    # ---------------- melhor primeiro (memória plana + purga) ----------------
     def melhor(self):
         n, c = self.n, self.c
+        if n > 256:
+            raise ValueError("Estratégia 'melhor' compacta vértices em 1 byte (máx n=256).")
+
         S0 = sum(self.base)
-        desempate = 0
-        # (lb, -profundidade, desempate, caminho, S, custo, cont, p1)
-        fila = [((S0 + 1) // 2, -1, desempate, (0,), S0, 0, 0, 0)]
-        self._atual = (0,)
-        self._caminho_atual = lambda: list(self._atual)
+        lb0 = (S0 + 1) // 2
+
+        # Banco plano de estados indexado por slot_id (0 .. total_slots - 1)
+        arr_S = array("Q")
+        arr_custo = array("Q")
+        arr_cont = array("H")
+        arr_p1 = array("H")
+        arr_k = array("H")
+        arr_mask = []
+        buf_caminhos = bytearray()
+        livres = []
+
+        def alocar_no(k, S, custo, cont, p1, mask, pai_id, novo_v):
+            if livres:
+                sid = livres.pop()
+                arr_S[sid] = S
+                arr_custo[sid] = custo
+                arr_cont[sid] = cont
+                arr_p1[sid] = p1
+                arr_k[sid] = k
+                arr_mask[sid] = mask
+            else:
+                sid = len(arr_S)
+                arr_S.append(S)
+                arr_custo.append(custo)
+                arr_cont.append(cont)
+                arr_p1.append(p1)
+                arr_k.append(k)
+                arr_mask.append(mask)
+                buf_caminhos.extend(b"\x00" * n)
+
+            base_dst = sid * n
+            if pai_id >= 0:
+                base_src = pai_id * n
+                buf_caminhos[base_dst : base_dst + k - 1] = (
+                    buf_caminhos[base_src : base_src + k - 1]
+                )
+            buf_caminhos[base_dst + k - 1] = novo_v
+            return sid
+
+        # Chave inteira de 64+ bits: (lb << 48) | ((65535 - k) << 32) | sid
+        # Garante a mesma ordem: menor lb -> maior profundidade k -> menor id (FIFO)
+        MASK_ID = (1 << 32) - 1
+
+        def empacotar_chave(lb, k, sid):
+            return (lb << 48) | ((65535 - k) << 32) | sid
+
+        sid0 = alocar_no(1, S0, 0, 0, 0, 1, -1, 0)
+        fila = [empacotar_chave(lb0, 1, sid0)]
+
+        atual_sid = sid0
+        atual_k = 1
+        self._caminho_atual = lambda: list(
+            buf_caminhos[atual_sid * n : atual_sid * n + atual_k]
+        )
+
+        # Passo 3: Purga nós obsoletos da heap quando UB melhora e a fila está grande
+        def purgar_fila():
+            if len(fila) < 500_000:
+                return
+            limite_chave = self.ub << 48
+            nova_fila = []
+            podados = 0
+            for ch in fila:
+                if ch >= limite_chave:
+                    livres.append(ch & MASK_ID)
+                    podados += 1
+                else:
+                    nova_fila.append(ch)
+            if podados > 0:
+                c["podados_limite"] += podados
+                fila[:] = nova_fila
+                heapq.heapify(fila)
+
+        self._ao_melhorar_ub = purgar_fila
+
         while fila:
-            lb, negk, _, caminho, S, custo, cont, p1 = heapq.heappop(fila)
+            ch = heapq.heappop(fila)
+            lb = ch >> 48
+            sid = ch & MASK_ID
+
             if lb >= self.ub:                  # UB melhorou depois do push
                 c["podados_limite"] += 1
+                livres.append(sid)
                 continue
-            k = -negk
+
+            k = arr_k[sid]
+            S = arr_S[sid]
+            custo = arr_custo[sid]
+            cont = arr_cont[sid]
+            p1 = arr_p1[sid]
+            mask = arr_mask[sid]
+
             c["expandidos"] += 1
             self._checar_tempo()
             if k > c["prof_max"]:
                 c["prof_max"] = k
-            visitado = [False] * n
-            for v in caminho:
-                visitado[v] = True
-            self._atual = caminho
-            ultimos = (caminho[-2] if k > 1 else -1, caminho[-1])
+
+            atual_sid = sid
+            atual_k = k
+            base = sid * n
+            ultimos = (buf_caminhos[base + k - 2] if k > 1 else -1,
+                       buf_caminhos[base + k - 1])
+
             for lb2, v, S2, custo2, cont2, p1v in self._filhos(
-                    ultimos, k, S, custo, cont, p1, visitado):
-                desempate += 1
-                heapq.heappush(fila, (lb2, -(k + 1), desempate, caminho + (v,),
-                                      S2, custo2, cont2, p1v))
+                    ultimos, k, S, custo, cont, p1, mask, usar_mask=True):
+                filho_sid = alocar_no(
+                    k + 1, S2, custo2, cont2, p1v, mask | (1 << v), sid, v
+                )
+                heapq.heappush(fila, empacotar_chave(lb2, k + 1, filho_sid))
+
+            # Libera o slot do nó pai após gerar seus filhos
+            livres.append(sid)
+
             if len(fila) > c["max_fila"]:
                 c["max_fila"] = len(fila)
                 if len(fila) > self.max_fila:
@@ -294,56 +391,3 @@ def branch_and_bound(D, tour_inicial=None, estrategia="profundidade",
         nos_por_s=busca.c["expandidos"] / tempo_busca if tempo_busca > 0 else 0.0,
         mem_pico=mem_pico,
     )
-
-
-# ---------------------------------------------------------------------------
-# Verificações
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    from itertools import permutations
-
-    from utils import matriz_euc2d
-
-    def otimo_forca_bruta(D):
-        n = D.shape[0]
-        return min(custo_tour(D, [0, *p]) for p in permutations(range(1, n)))
-
-    # Exemplo do slide (ótimo = 37)
-    nomes = "abcde"
-    pesos = {("a", "b"): 4, ("a", "c"): 8, ("a", "d"): 9, ("a", "e"): 12,
-             ("b", "c"): 6, ("b", "d"): 8, ("b", "e"): 9,
-             ("c", "d"): 10, ("c", "e"): 11, ("d", "e"): 7}
-    D = np.zeros((5, 5), dtype=np.int64)
-    for (x, y), w in pesos.items():
-        i, j = nomes.index(x), nomes.index(y)
-        D[i, j] = D[j, i] = w
-    for est in ("profundidade", "melhor"):
-        r = branch_and_bound(D, estrategia=est)
-        print(f"Slide [{est}]: H = {'-'.join(nomes[v] for v in r['tour'] + [r['tour'][0]])}"
-              f", custo {r['custo']} (UB inicial {r['ub_inicial']}, lb raiz {r['lb_raiz']}),"
-              f" expandidos {r['expandidos']}, podados {r['podados_limite']}")
-
-    # Instâncias aleatórias contra força bruta, nas duas estratégias,
-    # com e sem warm-start (o próprio ótimo como UB inicial)
-    rng = np.random.default_rng(0)
-    casos = 0
-    for n in range(4, 10):
-        for _ in range(25):
-            D = matriz_euc2d(rng.uniform(0, 1000, size=(n, 2)))
-            opt = otimo_forca_bruta(D)
-            for est in ("profundidade", "melhor"):
-                r = branch_and_bound(D, estrategia=est)
-                assert r["status"] == "otimo" and r["custo"] == opt, (n, est)
-                assert r["lb_raiz"] <= opt
-                assert sorted(r["tour"]) == list(range(n))
-                r2 = branch_and_bound(D, tour_inicial=r["tour"], estrategia=est)
-                assert r2["custo"] == opt and r2["melhorias_ub"] == 0
-                casos += 1
-    print(f"\n{casos} execuções aleatórias (n=4..9): ótimo sempre igual à força bruta")
-
-    # Limite de tempo: a busca para e devolve o melhor tour conhecido
-    D = matriz_euc2d(rng.uniform(0, 1000, size=(60, 2)))
-    r = branch_and_bound(D, limite_s=1.0)
-    print(f"\nn=60 com limite de 1 s: status={r['status']}, "
-          f"UB {r['ub_inicial']} -> {r['custo']}, expandidos {r['expandidos']}, "
-          f"{r['nos_por_s']:.0f} nós/s")
