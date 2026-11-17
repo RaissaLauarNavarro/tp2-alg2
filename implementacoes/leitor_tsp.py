@@ -15,20 +15,21 @@ Sempre devolve a matriz de distâncias D (numpy int64, n x n), que é a
 entrada que o christofides.py (e os outros algoritmos) recebem.
 
 Rodar este arquivo diretamente valida o leitor (pasta padrão: data/):
-    python tsplib.py
-    python tsplib.py outra_pasta/
+    python leitor_tsp.py
+    python leitor_tsp.py outra_pasta/
 Para cada X.opt.tour presente na pasta, calcula o custo do tour ótimo com a
 matriz lida de X.tsp e confere com o ótimo publicado. Se bater, o parser e a
 função de distância daquele tipo estão corretos.
 """
 
 import gzip
-import math
 import os
 import sys
 from dataclasses import dataclass, field
 
 import numpy as np
+
+from utils import custo_tour
 
 
 # Valores ótimos publicados na TSPLIB (todas as instâncias TSP simétricas)
@@ -271,11 +272,6 @@ def ler_tour(caminho):
     return tour
 
 
-def custo_tour(D, tour):
-    t = np.asarray(tour)
-    return int(D[t, np.roll(t, -1)].sum())
-
-
 def violacoes_desigualdade_triangular(D):
     """Quantos pares (i, j), i < j, têm um atalho k com D[i,k] + D[k,j] < D[i,j].
 
@@ -321,7 +317,7 @@ if __name__ == "__main__":
     pasta = sys.argv[1] if len(sys.argv) > 1 else "data"
     if not os.path.isdir(pasta):
         sys.exit(f"Pasta '{pasta}' não encontrada. Rode a partir da raiz do "
-                 f"projeto ou passe o caminho: python tsplib.py caminho/da/pasta")
+                 f"projeto ou passe o caminho: python leitor_tsp.py caminho/da/pasta")
     print(f"{'instância':<11}{'n':>4}  {'tipo':<22}{'ótimo':>8}{'opt.tour':>10}  "
           f"{'ok':<4}{'viol. Δ (pares/máx)':>21}{'pontos':>8}")
     falhas = 0

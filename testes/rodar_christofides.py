@@ -2,12 +2,12 @@
 Roda o Christofides em todas as instâncias TSPLIB da pasta data/ e salva as
 métricas num CSV (parte da "base de dados com as métricas coletadas").
 
-Uso (a partir da pasta implementacoes/; a pasta data/ fica em ../data):
-    python rodar_teste_christofides.py
-    python rodar_teste_christofides.py --reps 5 --memoria
-    python rodar_teste_christofides.py --nmin 10 --nmax 75     # filtra por tamanho
-    python rodar_teste_christofides.py --so-euc2d               # só EUC_2D
-    python rodar_teste_christofides.py outra_pasta/ --saida outro.csv
+Uso (a partir da pasta testes/; a pasta data/ fica em ../data e resultados em ../resultados):
+    python rodar_christofides.py
+    python rodar_christofides.py --reps 5 --memoria
+    python rodar_christofides.py --nmin 10 --nmax 75     # filtra por tamanho
+    python rodar_christofides.py --so-euc2d               # só EUC_2D
+    python rodar_christofides.py outra_pasta/ --saida ../resultados/outro.csv
 
 Por padrão roda TODAS as instâncias .tsp / .tsp.gz da pasta, sem filtro de n.
 
@@ -25,13 +25,17 @@ import os
 import statistics
 import sys
 
+RAIZ_PROJETO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PASTA_DATA_PADRAO = os.path.join(RAIZ_PROJETO, "data")
+PASTA_RESULTADOS_PADRAO = os.path.join(RAIZ_PROJETO, "resultados")
+
 # as implementações ficam em ../implementacoes
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "implementacoes"))
+sys.path.insert(0, os.path.join(RAIZ_PROJETO, "implementacoes"))
 
 from christofides import christofides
-from leitor_tsp import (ler_instancia, listar_instancias, custo_tour,
-                    violacoes_desigualdade_triangular)
+from leitor_tsp import (ler_instancia, listar_instancias,
+                        violacoes_desigualdade_triangular)
+from utils import custo_tour
 
 ETAPAS = ["mst", "impares", "matching", "euler", "atalho", "total"]
 
@@ -96,7 +100,7 @@ def avaliar(inst, reps, medir_memoria):
 
 def main():
     ap = argparse.ArgumentParser(description="Christofides nas instâncias TSPLIB")
-    ap.add_argument("pasta", nargs="?", default="../data",
+    ap.add_argument("pasta", nargs="?", default=PASTA_DATA_PADRAO,
                     help="pasta com os .tsp/.tsp.gz (padrão: ../data)")
     ap.add_argument("--nmin", type=int, default=0)
     ap.add_argument("--nmax", type=int, default=10**9)
@@ -104,15 +108,16 @@ def main():
     ap.add_argument("--memoria", action="store_true")
     ap.add_argument("--so-euc2d", action="store_true")
     ap.add_argument("--saida", default=None,
-                    help="padrão: resultados_christofides.csv (ou resultados_christofides_memoria.csv com --memoria)")
+                    help="padrão: ../resultados/resultados_christofides[_memoria].csv")
     args = ap.parse_args()
     if args.saida is None:
-        args.saida = ("resultados_christofides_memoria.csv" if args.memoria
-                      else "resultados_christofides.csv")
+        nome_arquivo = ("resultados_christofides_memoria.csv" if args.memoria
+                        else "resultados_christofides.csv")
+        args.saida = os.path.join(PASTA_RESULTADOS_PADRAO, nome_arquivo)
 
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
-                 f"implementacoes/ ou passe o caminho: python rodar_teste_christofides.py caminho/")
+                 f"testes/ ou passe o caminho: python rodar_christofides.py caminho/")
 
     caminhos = listar_instancias(args.pasta, args.nmin, args.nmax)
     if not caminhos:
@@ -144,11 +149,14 @@ def main():
         print(f"PULADA {arq}: {motivo}")
 
     if linhas:
+        pasta_saida = os.path.dirname(os.path.abspath(args.saida))
+        if pasta_saida:
+            os.makedirs(pasta_saida, exist_ok=True)
         with open(args.saida, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(linhas[0].keys()))
             w.writeheader()
             w.writerows(linhas)
-        print(f"\n{len(linhas)} instâncias -> {args.saida}")
+        print(f"{len(linhas)} instâncias -> {args.saida}")
 
 
 if __name__ == "__main__":
