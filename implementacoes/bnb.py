@@ -1,32 +1,28 @@
 """
-Branch-and-Bound exato para o TSP simétrico com lower bound baseado em MST.
+Branch-and-Bound exato para o TSP simétrico com relaxação de Held-Karp (1-tree).
 
 Árvore de busca:
   Cada nó representa um caminho parcial que começa no vértice 0.
   A ramificação estende o caminho por um vértice ainda não visitado.
   Quando todos os vértices são visitados, fecha-se o ciclo voltando ao 0.
 
-Lower bound:
-  Para um caminho parcial P = (0, ..., u), seja U o conjunto dos vértices
-  ainda não visitados. Qualquer conclusão do caminho precisa:
-    - conectar u a U;
-    - conectar todos os vértices de U;
-    - conectar U ao vértice inicial 0.
+Lower bound (Relaxação de Held-Karp):
+  Atribuímos penalidades pi_v a cada vértice v, definindo pesos modificados:
+    w_pi(a, b) = d(a, b) + pi_a + pi_b
 
-  Usamos:
-    LB(P) = custo(P) + MST(U)
-            + min_{x em U} d(u, x)
-            + min_{y em U} d(0, y)
+  Para um caminho parcial P = (0, ..., u) com vértices não visitados U e
+  W = {u} U U:
+    - Os vértices internos de P já possuem grau fixo 2;
+    - A 1-tree condicionada conecta 0 a P, forma uma MST penalizada em W e
+      liga 0 ao vértice y em U que minimiza d(0, y) + pi_y.
 
-  Na raiz, ainda não há extremidade final distinta da origem. Portanto:
-    LB(raiz) = MST(V \\ {0}) + duas menores arestas distintas saindo de 0.
+  O limite inferior lagrangiano é:
+    L(pi) = custo(P) + pi_u + MST_pi(W) + min_{y em U}(d(0, y) + pi_y)
+            - 2 * sum_{v em W} pi_v
 
-  O limite é válido, embora as duas conexões mínimas do caso geral possam
-  escolher o mesmo vértice: isso apenas pode subestimar o custo real.
-
-MST:
-  Prim com vetor de chaves, executado diretamente sobre a lista de listas
-  de distâncias. Para m vértices, custa O(m²).
+  Os multiplicadores pi são ajustados via ascensão de subgradiente usando
+  g_v = grau_1tree(v) - 2 e herdados (warm-start) pelos nós filhos.
+  Como D possui distâncias inteiras, ceil(L(pi) - 1e-9) é um LB inteiro válido.
 
 Poda:
   Um nó é podado quando LB >= melhor custo conhecido (UB).
@@ -45,6 +41,7 @@ Entrada:
 
 from array import array
 import heapq
+import math
 import time
 import tracemalloc
 
@@ -60,26 +57,28 @@ class _Interrompido(Exception):
 
 
 # ---------------------------------------------------------------------------
-# MST e lower bound
+# MST penalizada e relaxação de Held-Karp
 # ---------------------------------------------------------------------------
 
-def mst_custo(Dl, vertices):
-    """Retorna o custo da MST induzida por `vertices`, usando Prim O(m²).
+def _mst_penalizada(Dl, vertices, pi):
+    """MST via Prim O(m²) sobre w_pi(u, v) = Dl[u][v] + pi[u] + pi[v].
 
-    Dl é a matriz de distâncias no formato lista de listas.
+    Calcula os pesos penalizados sob demanda para evitar alocar matrizes n x n.
+    Retorna (custo_mst_penalizado, graus_na_mst).
     """
     m = len(vertices)
+    graus = [0] * m
 
     if m <= 1:
-        return 0
+        return 0.0, graus
 
     na_arvore = [False] * m
     chave = [float("inf")] * m
-    chave[0] = 0
-    custo = 0
+    pai = [-1] * m
+    chave[0] = 0.0
+    custo = 0.0
 
     for _ in range(m):
-        # Vértice fora da árvore com menor chave.
         u = -1
         menor = float("inf")
         for i in range(m):
@@ -90,32 +89,109 @@ def mst_custo(Dl, vertices):
         na_arvore[u] = True
         custo += chave[u]
 
-        vu = vertices[u]
+        p = pai[u]
+        if p != -1:
+            graus[u] += 1
+            graus[p] += 1
 
-        # Atualiza as chaves usando as distâncias a partir de vu.
+        vu = vertices[u]
+        pi_vu = pi[vu]
+        linha_vu = Dl[vu]
+
         for i in range(m):
             if not na_arvore[i]:
                 vi = vertices[i]
-                w = Dl[vu][vi]
+                w = linha_vu[vi] + pi_vu + pi[vi]
                 if w < chave[i]:
                     chave[i] = w
+                    pai[i] = u
 
-    return custo
+    return custo, graus
 
 
-def limite_inferior_raiz(D):
-    """Calcula o lower bound da raiz."""
-    Dl = np.asarray(D).tolist()
+def _held_karp_raiz(Dl, ub, iters=100):
+    """Calcula o lower bound de Held-Karp na raiz e retorna (lb_int, pi)."""
+    n = len(Dl)
+    pi = [0.0] * n
+
+    if n <= 1:
+        return 0, pi
+
+    U = list(range(1, n))
+    m = len(U)
+    linha0 = Dl[0]
+
+    melhor_lb = float("-inf")
+    lam = 2.0
+    sem_melhora = 0
+
+    for _ in range(iters):
+        custo_mst, graus = _mst_penalizada(Dl, U, pi)
+
+        # Duas menores arestas saindo da origem 0 sob w_pi(0, v) = d(0, v) + pi_0 + pi_v.
+        m1 = m2 = float("inf")
+        idx1 = idx2 = -1
+        for i, v in enumerate(U):
+            w = linha0[v] + pi[v]
+            if w < m1:
+                m2, idx2 = m1, idx1
+                m1, idx1 = w, i
+            elif w < m2:
+                m2, idx2 = w, i
+
+        graus[idx1] += 1
+        graus[idx2] += 1
+
+        soma_pi_U = sum(pi[v] for v in U)
+        lb = custo_mst + m1 + m2 - 2.0 * soma_pi_U
+
+        if lb > melhor_lb + 1e-9:
+            melhor_lb = lb
+            sem_melhora = 0
+        else:
+            sem_melhora += 1
+            if sem_melhora == 5:
+                lam *= 0.5
+                sem_melhora = 0
+
+        lb_int = max(0, int(math.ceil(melhor_lb - 1e-9)))
+        if lb_int >= ub:
+            return lb_int, pi
+
+        # Subgradiente: g_v = grau(v) - 2
+        norm_sq = 0
+        for g_idx in range(m):
+            g = graus[g_idx] - 2
+            norm_sq += g * g
+
+        if norm_sq == 0:
+            # Todos os vértices têm grau 2: a 1-tree já é um ciclo hamiltoniano.
+            break
+
+        gap = max(0.0, ub - lb)
+        passo = lam * gap / norm_sq
+        for i, v in enumerate(U):
+            g = graus[i] - 2
+            if g != 0:
+                pi[v] += passo * g
+
+    return max(0, int(math.ceil(melhor_lb - 1e-9))), pi
+
+
+def limite_inferior_raiz(D, ub=None, iters=100):
+    """Calcula o lower bound da raiz via Held-Karp."""
+    D = np.asarray(D)
+    Dl = D.tolist()
     n = len(Dl)
 
     if n <= 1:
         return 0
 
-    U = list(range(1, n))
-    mst = mst_custo(Dl, U)
+    if ub is None:
+        ub = custo_tour(D, solucao_trivial(D))
 
-    duas_menores = sorted(Dl[0][v] for v in U)[:2]
-    return mst + sum(duas_menores)
+    lb_int, _ = _held_karp_raiz(Dl, ub, iters=iters)
+    return lb_int
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +199,8 @@ def limite_inferior_raiz(D):
 # ---------------------------------------------------------------------------
 
 class _Busca:
-    def __init__(self, D, ub, tour_ub, limite_s, max_fila):
+    def __init__(self, D, ub, tour_ub, limite_s, max_fila,
+                 iters_raiz=100, iters_no=15):
         self.n = D.shape[0]
         self.Dl = D.tolist()
 
@@ -131,6 +208,8 @@ class _Busca:
         self.tour_ub = list(tour_ub)
         self.limite_s = limite_s
         self.max_fila = max_fila
+        self.iters_raiz = iters_raiz
+        self.iters_no = iters_no
 
         self.t0 = time.perf_counter()
         self.prazo = self.t0 + limite_s
@@ -150,36 +229,94 @@ class _Busca:
         self._ao_melhorar_ub = None
 
     def _lower_bound_raiz(self):
-        """MST dos vértices 1..n-1 + duas conexões distintas à origem."""
-        U = list(range(1, self.n))
-        mst = mst_custo(self.Dl, U)
-        duas_menores = sorted(self.Dl[0][v] for v in U)[:2]
-        return mst + sum(duas_menores)
+        """Held-Karp na raiz: retorna (lb_int, pi_raiz)."""
+        return _held_karp_raiz(self.Dl, self.ub, iters=self.iters_raiz)
 
-    def _lower_bound(self, custo, ultimo, U):
-        """LB para P=(0,...,ultimo), com U ainda não visitado."""
+    def _lower_bound(self, custo, ultimo, U, pi_pai):
+        """LB de Held-Karp para P=(0,...,ultimo), com warm-start em pi_pai.
+
+        Retorna (lb_int, pi_atualizado).
+        """
         Dl = self.Dl
+        pi = list(pi_pai)
 
-        mst = mst_custo(Dl, U)
-        conecta_fim = min(Dl[ultimo][x] for x in U)
-        conecta_inicio = min(Dl[0][x] for x in U)
+        # Caso base: resta apenas 1 vértice em U; conclusão única e exata.
+        if len(U) == 1:
+            x = U[0]
+            return custo + Dl[ultimo][x] + Dl[x][0], pi
 
-        return custo + mst + conecta_fim + conecta_inicio
+        W = [ultimo] + U
+        m = len(W)
+        linha0 = Dl[0]
+
+        melhor_lb = float("-inf")
+        lam = 2.0
+        sem_melhora = 0
+
+        for _ in range(self.iters_no):
+            custo_mst, graus = _mst_penalizada(Dl, W, pi)
+
+            # Extremidade `ultimo` já possui 1 aresta fixa vinda do caminho P.
+            graus[0] += 1
+
+            # Conexão mínima da origem 0 a algum vértice y em U (= W[1:]).
+            melhor_y = float("inf")
+            idx_y = 1
+            for i in range(1, m):
+                v = W[i]
+                w = linha0[v] + pi[v]
+                if w < melhor_y:
+                    melhor_y = w
+                    idx_y = i
+
+            graus[idx_y] += 1
+
+            soma_pi_W = sum(pi[v] for v in W)
+            lb = custo + pi[ultimo] + custo_mst + melhor_y - 2.0 * soma_pi_W
+
+            if lb > melhor_lb + 1e-9:
+                melhor_lb = lb
+                sem_melhora = 0
+            else:
+                sem_melhora += 1
+                if sem_melhora == 4:
+                    lam *= 0.5
+                    sem_melhora = 0
+
+            lb_int = max(0, int(math.ceil(melhor_lb - 1e-9)))
+            if lb_int >= self.ub:
+                return lb_int, pi
+
+            norm_sq = 0
+            for i in range(m):
+                g = graus[i] - 2
+                norm_sq += g * g
+
+            if norm_sq == 0:
+                break
+
+            gap = max(0.0, self.ub - lb)
+            passo = lam * gap / norm_sq
+            for i in range(m):
+                g = graus[i] - 2
+                if g != 0:
+                    pi[W[i]] += passo * g
+
+        return max(0, int(math.ceil(melhor_lb - 1e-9))), pi
 
     def _filhos(self, caminho_ultimos, k, custo, cont, p1,
-                visitado, usar_mask=False):
+                visitado, pi_pai, usar_mask=False):
         """Gera os filhos sobreviventes à poda.
 
-        Retorna tuplas (lb, v, custo2, cont2, p1v).
+        Retorna tuplas (lb, v, custo2, cont2, p1v, pi_filho).
         Folhas são fechadas aqui e podem atualizar o limite superior.
         """
         n, Dl, c = self.n, self.Dl, self.c
-        p, u = caminho_ultimos
+        _, u = caminho_ultimos
 
         saida = []
         restantes = n - k - 1
 
-        # Vértices não visitados antes de adicionar o próximo vértice.
         if usar_mask:
             nao_visitados = [
                 v for v in range(1, n)
@@ -220,16 +357,14 @@ class _Busca:
 
                 continue
 
-            # U após adicionar v ao caminho.
             U = [x for x in nao_visitados if x != v]
-
-            lb = self._lower_bound(custo2, v, U)
+            lb, pi_filho = self._lower_bound(custo2, v, U, pi_pai)
 
             if lb >= self.ub:
                 c["podados_limite"] += 1
                 continue
 
-            saida.append((lb, v, custo2, cont2, p1v))
+            saida.append((lb, v, custo2, cont2, p1v, pi_filho))
 
         return saida
 
@@ -249,16 +384,16 @@ class _Busca:
 
     # ---------------- profundidade ----------------
 
-    def profundidade(self):
+    def profundidade(self, pi_raiz):
         self.visitado = [False] * self.n
         self.visitado[0] = True
 
         self.caminho = [0]
         self._caminho_atual = lambda: list(self.caminho)
 
-        self._dfs(0, 0, 0)
+        self._dfs(0, 0, 0, pi_raiz)
 
-    def _dfs(self, custo, cont, p1):
+    def _dfs(self, custo, cont, p1, pi_atual):
         c = self.c
         caminho = self.caminho
         visitado = self.visitado
@@ -276,12 +411,11 @@ class _Busca:
         )
 
         filhos = self._filhos(
-            ultimos, k, custo, cont, p1, visitado, usar_mask=False
+            ultimos, k, custo, cont, p1, visitado, pi_atual, usar_mask=False
         )
-        filhos.sort()  # menor LB primeiro
+        filhos.sort(key=lambda item: item[0])  # menor LB primeiro
 
-        for lb, v, custo2, cont2, p1v in filhos:
-            # O UB pode ter melhorado durante a exploração de outro filho.
+        for lb, v, custo2, cont2, p1v, pi_filho in filhos:
             if lb >= self.ub:
                 c["podados_limite"] += 1
                 continue
@@ -289,14 +423,14 @@ class _Busca:
             visitado[v] = True
             caminho.append(v)
 
-            self._dfs(custo2, cont2, p1v)
+            self._dfs(custo2, cont2, p1v, pi_filho)
 
             caminho.pop()
             visitado[v] = False
 
     # ---------------- melhor primeiro ----------------
 
-    def melhor(self):
+    def melhor(self, lb0, pi_raiz):
         n, c = self.n, self.c
 
         if n > 256:
@@ -305,17 +439,17 @@ class _Busca:
                 "(máximo n=256)."
             )
 
-        # Banco plano de estados indexado por slot_id.
         arr_custo = array("Q")
         arr_cont = array("H")
         arr_p1 = array("H")
         arr_k = array("H")
         arr_mask = []
+        arr_pi = []
 
         buf_caminhos = bytearray()
         livres = []
 
-        def alocar_no(k, custo, cont, p1, mask, pai_id, novo_v):
+        def alocar_no(k, custo, cont, p1, mask, pi_no, pai_id, novo_v):
             if livres:
                 sid = livres.pop()
                 arr_custo[sid] = custo
@@ -323,6 +457,7 @@ class _Busca:
                 arr_p1[sid] = p1
                 arr_k[sid] = k
                 arr_mask[sid] = mask
+                arr_pi[sid] = pi_no
             else:
                 sid = len(arr_custo)
                 arr_custo.append(custo)
@@ -330,6 +465,7 @@ class _Busca:
                 arr_p1.append(p1)
                 arr_k.append(k)
                 arr_mask.append(mask)
+                arr_pi.append(pi_no)
                 buf_caminhos.extend(b"\x00" * n)
 
             base_dst = sid * n
@@ -343,14 +479,12 @@ class _Busca:
             buf_caminhos[base_dst + k - 1] = novo_v
             return sid
 
-        # Chave: menor LB primeiro; em empate, maior profundidade primeiro.
         MASK_ID = (1 << 32) - 1
 
         def empacotar_chave(lb, k, sid):
             return (lb << 48) | ((65535 - k) << 32) | sid
 
-        lb0 = self._lower_bound_raiz()
-        sid0 = alocar_no(1, 0, 0, 0, 1, -1, 0)
+        sid0 = alocar_no(1, 0, 0, 0, 1, pi_raiz, -1, 0)
         fila = [empacotar_chave(lb0, 1, sid0)]
 
         atual_sid = sid0
@@ -360,7 +494,6 @@ class _Busca:
             buf_caminhos[atual_sid * n:atual_sid * n + atual_k]
         )
 
-        # Purga nós obsoletos da heap quando o UB melhora e a fila é grande.
         def purgar_fila():
             if len(fila) < 500_000:
                 return
@@ -371,7 +504,9 @@ class _Busca:
 
             for ch in fila:
                 if ch >= limite_chave:
-                    livres.append(ch & MASK_ID)
+                    sid_morto = ch & MASK_ID
+                    arr_pi[sid_morto] = None
+                    livres.append(sid_morto)
                     podados += 1
                 else:
                     nova_fila.append(ch)
@@ -390,6 +525,7 @@ class _Busca:
 
             if lb >= self.ub:
                 c["podados_limite"] += 1
+                arr_pi[sid] = None
                 livres.append(sid)
                 continue
 
@@ -398,6 +534,7 @@ class _Busca:
             cont = arr_cont[sid]
             p1 = arr_p1[sid]
             mask = arr_mask[sid]
+            pi_no = arr_pi[sid]
 
             c["expandidos"] += 1
             self._checar_tempo()
@@ -415,16 +552,17 @@ class _Busca:
             )
 
             filhos = self._filhos(
-                ultimos, k, custo, cont, p1, mask, usar_mask=True
+                ultimos, k, custo, cont, p1, mask, pi_no, usar_mask=True
             )
 
-            for lb2, v, custo2, cont2, p1v in filhos:
+            for lb2, v, custo2, cont2, p1v, pi_filho in filhos:
                 filho_sid = alocar_no(
                     k + 1,
                     custo2,
                     cont2,
                     p1v,
                     mask | (1 << v),
+                    pi_filho,
                     sid,
                     v,
                 )
@@ -433,7 +571,7 @@ class _Busca:
                     empacotar_chave(lb2, k + 1, filho_sid),
                 )
 
-            # Libera o slot do nó pai depois de gerar todos os filhos.
+            arr_pi[sid] = None
             livres.append(sid)
 
             if len(fila) > c["max_fila"]:
@@ -453,8 +591,10 @@ def branch_and_bound(
     limite_s=1800.0,
     max_fila=2_000_000,
     medir_memoria=False,
+    iters_raiz=100,
+    iters_no=15,
 ):
-    """Resolve o TSP simétrico por Branch-and-Bound.
+    """Resolve o TSP simétrico por Branch-and-Bound com Held-Karp.
 
     Parâmetros
     ----------
@@ -470,6 +610,10 @@ def branch_and_bound(
         Número máximo de nós simultaneamente na fila da estratégia "melhor".
     medir_memoria : bool
         Se True, mede o pico de memória com tracemalloc.
+    iters_raiz : int
+        Iterações de subgradiente de Held-Karp na raiz.
+    iters_no : int
+        Iterações de subgradiente de Held-Karp por nó interno (warm-start).
 
     Retorno
     -------
@@ -517,19 +661,23 @@ def branch_and_bound(
         tracemalloc.reset_peak()
 
     t_pre = time.perf_counter()
-    busca = _Busca(D, ub0, tour_inicial, limite_s, max_fila)
-    lb_raiz = busca._lower_bound_raiz()
+    busca = _Busca(
+        D, ub0, tour_inicial, limite_s, max_fila,
+        iters_raiz=iters_raiz, iters_no=iters_no,
+    )
+    lb_raiz, pi_raiz = busca._lower_bound_raiz()
     tempo_pre = time.perf_counter() - t_pre
 
     status = "otimo"
 
     try:
-        if estrategia == "profundidade":
-            busca.profundidade()
-        elif estrategia == "melhor":
-            busca.melhor()
-        else:
-            raise ValueError(f"Estratégia desconhecida: {estrategia}")
+        if lb_raiz < busca.ub:
+            if estrategia == "profundidade":
+                busca.profundidade(pi_raiz)
+            elif estrategia == "melhor":
+                busca.melhor(lb_raiz, pi_raiz)
+            else:
+                raise ValueError(f"Estratégia desconhecida: {estrategia}")
     except _Interrompido as e:
         status = e.status
 
