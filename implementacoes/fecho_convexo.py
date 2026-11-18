@@ -18,8 +18,9 @@ Algoritmo (Stewart, 1977; Golden, Bodin, Doyle e Stewart, 1980):
      (d(i,k) + d(k,j)) / d(i,j).
   3. Retorne a sub-rota, que agora contém todos os vértices.
 
-O fecho é calculado aqui (monotone chain de Andrew, O(n log n)); o SciPy só é
-usado no teste, para conferir o resultado. A inserção avalia todos os pares
+O fecho é calculado aqui pela Varredura de Graham, como na aula 05 (DCC207,
+slides 4 a 8; CLRS 33.3), em O(n log n); o SciPy só é usado no teste, para
+conferir o resultado. A inserção avalia todos os pares
 (vértice de fora, aresta) a cada passo, vetorizado em NumPy: O(n^2) por
 inserção, O(n^3) no total. Os CUSTOS vêm sempre da matriz D real da instância;
 as coordenadas servem só para escolher a sub-rota inicial.
@@ -37,6 +38,7 @@ Coordenadas usadas para o fecho (função pontos_para_fecho):
 
 import time
 import tracemalloc
+from functools import cmp_to_key
 
 import numpy as np
 
@@ -86,40 +88,97 @@ def pontos_para_fecho(inst):
 
 
 # ---------------------------------------------------------------------------
-# Passo 1: fecho convexo (monotone chain de Andrew)
+# Passo 1: fecho convexo (Varredura de Graham, aula 05, slides 4 a 8)
 # ---------------------------------------------------------------------------
 def _cruz(o, a, b):
+    """Produto vetorial (a - o) x (b - o).
+    > 0: o -> a -> b vira à esquerda; < 0: à direita; = 0: colineares."""
     return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
 
 
-def fecho_convexo(pontos):
-    """Índices dos vértices do fecho convexo, no sentido anti-horário.
+def _dist2(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2
 
-    Pontos colineares sobre uma aresta do fecho NÃO entram (cruz <= 0 remove):
-    eles são inseridos depois, como os internos. Pontos com coordenadas
-    repetidas contam uma vez só (fica o de menor índice). Se todos os pontos
-    forem colineares, devolve as duas extremidades; se forem todos iguais,
-    devolve um único índice."""
+
+def fecho_convexo(pontos):
+    """Varredura de Graham (Graham, 1972; CLRS 33.3). Devolve os índices dos
+    vértices do fecho convexo, no sentido anti-horário, começando pela âncora p0.
+
+    Passos, como nos slides:
+      1. Âncora p0: o ponto de menor coordenada y; em caso de empate, o mais à
+         esquerda. Por ser o mais baixo, é com certeza vértice do fecho.
+      2. Os demais pontos são ordenados pelo ângulo polar em relação a p0, no
+         sentido anti-horário. Entre pontos com o mesmo ângulo, só o MAIS
+         DISTANTE de p0 é mantido: os mais próximos estão sobre o segmento
+         p0 -> mais distante, então não podem ser vértices do fecho.
+      3. Pilha com p0, p1, p2. Para cada ponto seguinte pi: enquanto o caminho
+         (penúltimo da pilha) -> (topo) -> pi NÃO virar à esquerda, o topo é
+         vértice interno e sai da pilha. Depois, pi entra na pilha.
+      4. A pilha contém os vértices do fecho.
+
+    A ordenação usa o produto vetorial em vez de ângulos (atan2), o que é exato
+    para coordenadas inteiras e não depende de ponto flutuante. Como todos os
+    pontos estão acima de p0 (ou na mesma altura, à direita), os ângulos ficam
+    em [0, pi) e o produto vetorial define uma ordem total.
+    Custo: O(n log n) da ordenação + O(n) da varredura (cada ponto entra e sai
+    da pilha no máximo uma vez).
+
+    Suposições dos slides e como os dados reais são tratados:
+      - "não há 3 pontos colineares": instâncias reais têm colineares. Os de
+        mesmo ângulo em relação a p0 são resolvidos no passo 2; nos outros, o
+        teste "não vira à esquerda" (cruz <= 0) desempilha o ponto do meio.
+        Assim, pontos colineares sobre uma aresta do fecho NÃO entram nele;
+        eles são inseridos depois, como os internos.
+      - Pontos com coordenadas repetidas contam uma vez só (fica o de menor
+        índice).
+      - "P contém ao menos 3 pontos": se sobrarem menos de 3 pontos distintos,
+        ou se todos forem colineares, devolve os 1 ou 2 pontos extremos."""
     P = [(float(x), float(y)) for x, y in np.asarray(pontos)[:, :2]]
+
+    # pontos distintos (fica o de menor índice)
     vistos, idx = set(), []
-    for i in sorted(range(len(P)), key=lambda i: (P[i], i)):
+    for i in range(len(P)):
         if P[i] not in vistos:
             vistos.add(P[i])
             idx.append(i)
     if len(idx) <= 2:
         return idx
 
-    def cadeia(ordem):
-        h = []
-        for i in ordem:
-            while len(h) >= 2 and _cruz(P[h[-2]], P[h[-1]], P[i]) <= 0:
-                h.pop()
-            h.append(i)
-        return h
+    # 1. âncora: menor y, mais à esquerda no empate
+    p0 = min(idx, key=lambda i: (P[i][1], P[i][0]))
+    resto = [i for i in idx if i != p0]
 
-    inferior = cadeia(idx)
-    superior = cadeia(reversed(idx))
-    return inferior[:-1] + superior[:-1]
+    # 2. ordenação pelo ângulo polar em relação a p0 (anti-horário); no mesmo
+    #    ângulo, do mais próximo para o mais distante
+    def compara(i, j):
+        c = _cruz(P[p0], P[i], P[j])
+        if c > 0:            # j está à esquerda de p0 -> i: ângulo de i é menor
+            return -1
+        if c < 0:
+            return 1
+        return -1 if _dist2(P[p0], P[i]) < _dist2(P[p0], P[j]) else 1
+
+    resto.sort(key=cmp_to_key(compara))
+
+    # no mesmo ângulo, mantém só o mais distante (o último do grupo)
+    ordenados = []
+    for k, i in enumerate(resto):
+        if k + 1 < len(resto) and _cruz(P[p0], P[i], P[resto[k + 1]]) == 0:
+            continue
+        ordenados.append(i)
+
+    if len(ordenados) < 2:     # todos os pontos colineares com p0
+        return [p0] + ordenados
+
+    # 3. varredura com pilha
+    pilha = [p0, ordenados[0], ordenados[1]]
+    for i in ordenados[2:]:
+        while len(pilha) >= 2 and _cruz(P[pilha[-2]], P[pilha[-1]], P[i]) <= 0:
+            pilha.pop()
+        pilha.append(i)
+
+    # 4. a pilha é o fecho, em sentido anti-horário a partir de p0
+    return pilha
 
 
 # ---------------------------------------------------------------------------
@@ -247,6 +306,13 @@ if __name__ == "__main__":
                          for i in range(1, len(meu) - 1))
         assert abs(area - ref.volume) < 1e-6 and area > 0       # anti-horário
     print("Fecho convexo: igual ao do SciPy em 300 conjuntos (incl. colineares e repetidos)")
+
+    # casos fora das suposições do slide (colineares, repetidos, menos de 3 pontos)
+    assert fecho_convexo(np.array([[0, 0], [1, 1], [2, 2], [3, 3]])) == [0, 3]
+    assert fecho_convexo(np.array([[5, 5], [5, 5], [5, 5]])) == [0]
+    quadrado = np.array([[0, 0], [1, 0], [2, 0], [2, 1], [2, 2], [1, 2], [0, 2], [0, 1], [1, 1]])
+    assert fecho_convexo(quadrado) == [0, 2, 4, 6]   # pontos sobre as arestas ficam de fora
+    print("Casos degenerados (todos colineares, todos iguais, pontos sobre as arestas): ok")
 
     # (b) inserção vetorizada igual a uma versão de referência em Python puro
     def insercao_referencia(D, sub):
