@@ -109,23 +109,31 @@ def _mst_penalizada(Dl, vertices, pi):
     return custo, graus
 
 
-def _held_karp_raiz(Dl, ub, iters=100):
-    """Calcula o lower bound de Held-Karp na raiz e retorna (lb_int, pi)."""
+def _held_karp_raiz(Dl, ub, iters=100, trajetoria_raiz=None):
+    """Calcula o lower bound de Held-Karp na raiz e retorna (lb_int, pi).
+
+    Se `trajetoria_raiz` for uma lista, registra [iteracao, tempo_s, lb_int]
+    sempre que o melhor LB inteiro da raiz avançar.
+    """
     n = len(Dl)
     pi = [0.0] * n
 
     if n <= 1:
+        if trajetoria_raiz is not None:
+            trajetoria_raiz.append([0, 0.0, 0])
         return 0, pi
 
+    t0 = time.perf_counter()
     U = list(range(1, n))
     m = len(U)
     linha0 = Dl[0]
 
     melhor_lb = float("-inf")
+    ultimo_lb_int = -1
     lam = 2.0
     sem_melhora = 0
 
-    for _ in range(iters):
+    for it in range(1, iters + 1):
         custo_mst, graus = _mst_penalizada(Dl, U, pi)
 
         # Duas menores arestas saindo da origem 0 sob w_pi(0, v) = d(0, v) + pi_0 + pi_v.
@@ -155,6 +163,14 @@ def _held_karp_raiz(Dl, ub, iters=100):
                 sem_melhora = 0
 
         lb_int = max(0, int(math.ceil(melhor_lb - 1e-9)))
+        if trajetoria_raiz is not None and lb_int > ultimo_lb_int:
+            ultimo_lb_int = lb_int
+            trajetoria_raiz.append([
+                it,
+                round(time.perf_counter() - t0, 6),
+                lb_int,
+            ])
+
         if lb_int >= ub:
             return lb_int, pi
 
@@ -214,11 +230,17 @@ class _Busca:
         self.t0 = time.perf_counter()
         self.prazo = self.t0 + limite_s
 
+        # Pré-computa fatoriais para calcular o número exato de folhas cortadas por poda
+        self._fat = [1] * (self.n + 1)
+        for i in range(1, self.n + 1):
+            self._fat[i] = self._fat[i - 1] * i
+
         self.c = dict(
             gerados=1,
             expandidos=0,
             podados_limite=0,
             podados_simetria=0,
+            folhas_eliminadas_limite=0,
             folhas=0,
             melhorias_ub=0,
             prof_max=1,
@@ -228,9 +250,51 @@ class _Busca:
         self.tempo_ate_melhor = 0.0
         self._ao_melhorar_ub = None
 
+        # Trajetórias:
+        # trajetoria_ub: [[expandidos, segundos, custo], ...]
+        # trajetoria_lb_raiz: [[iteracao, segundos, lb_int], ...]
+        # trajetoria_lb: [[expandidos, segundos, lb_global], ...] (populada na busca)
+        self.trajetoria_ub = [[0, 0.0, int(ub)]]
+        self.trajetoria_lb_raiz = []
+        self.trajetoria_lb = []
+        self._ultimo_lb_global = -1
+
+    def _registrar_lb_global(self, lb_atual):
+        """Registra avanço estrito do lower bound global da árvore de busca."""
+        if lb_atual > self._ultimo_lb_global:
+            self._ultimo_lb_global = int(lb_atual)
+            self.trajetoria_lb.append([
+                self.c["expandidos"],
+                round(time.perf_counter() - self.t0, 6),
+                int(lb_atual),
+            ])
+
+    def _registrar_poda_limite(self, prof_no, cont2):
+        """Contabiliza a poda de um nó na profundidade `prof_no` (1-indexada)
+        e soma o número exato de nós folhas (tours válidos pela simetria) eliminados.
+        """
+        self.c["podados_limite"] += 1
+        r = self.n - prof_no  # vértices restantes após este nó
+
+        if r <= 0:
+            self.c["folhas_eliminadas_limite"] += 1
+            return
+
+        # Das r! permutações dos vértices restantes, apenas aquelas que terminam
+        # com um dos `cont2` vértices maiores que p1 respeitam a quebra de simetria:
+        # cont2 * (r - 1)!
+        self.c["folhas_eliminadas_limite"] += cont2 * self._fat[r - 1]
+
     def _lower_bound_raiz(self):
         """Held-Karp na raiz: retorna (lb_int, pi_raiz)."""
-        return _held_karp_raiz(self.Dl, self.ub, iters=self.iters_raiz)
+        lb_raiz, pi_raiz = _held_karp_raiz(
+            self.Dl,
+            self.ub,
+            iters=self.iters_raiz,
+            trajetoria_raiz=self.trajetoria_lb_raiz,
+        )
+        self._registrar_lb_global(lb_raiz)
+        return lb_raiz, pi_raiz
 
     def _lower_bound(self, custo, ultimo, U, pi_pai):
         """LB de Held-Karp para P=(0,...,ultimo), com warm-start em pi_pai.
@@ -361,7 +425,7 @@ class _Busca:
             lb, pi_filho = self._lower_bound(custo2, v, U, pi_pai)
 
             if lb >= self.ub:
-                c["podados_limite"] += 1
+                self._registrar_poda_limite(k + 1, cont2)
                 continue
 
             saida.append((lb, v, custo2, cont2, p1v, pi_filho))
@@ -369,10 +433,16 @@ class _Busca:
         return saida
 
     def _novo_ub(self, total, ultimo):
-        self.ub = total
+        agora = time.perf_counter() - self.t0
+        self.ub = int(total)
         self.tour_ub = self._caminho_atual() + [ultimo]
         self.c["melhorias_ub"] += 1
-        self.tempo_ate_melhor = time.perf_counter() - self.t0
+        self.tempo_ate_melhor = agora
+        self.trajetoria_ub.append([
+            self.c["expandidos"],
+            round(agora, 6),
+            int(total),
+        ])
 
         if self._ao_melhorar_ub is not None:
             self._ao_melhorar_ub()
@@ -391,7 +461,10 @@ class _Busca:
         self.caminho = [0]
         self._caminho_atual = lambda: list(self.caminho)
 
+        # Na DFS, o lower bound global da árvore só pode avançar quando
+        # o ramo inteiro sob a raiz é esgotado (fechando a prova).
         self._dfs(0, 0, 0, pi_raiz)
+        self._registrar_lb_global(self.ub)
 
     def _dfs(self, custo, cont, p1, pi_atual):
         c = self.c
@@ -417,7 +490,7 @@ class _Busca:
 
         for lb, v, custo2, cont2, p1v, pi_filho in filhos:
             if lb >= self.ub:
-                c["podados_limite"] += 1
+                self._registrar_poda_limite(k + 1, cont2)
                 continue
 
             visitado[v] = True
@@ -505,6 +578,7 @@ class _Busca:
             for ch in fila:
                 if ch >= limite_chave:
                     sid_morto = ch & MASK_ID
+                    self._registrar_poda_limite(arr_k[sid_morto], arr_cont[sid_morto])
                     arr_pi[sid_morto] = None
                     livres.append(sid_morto)
                     podados += 1
@@ -512,7 +586,6 @@ class _Busca:
                     nova_fila.append(ch)
 
             if podados:
-                c["podados_limite"] += podados
                 fila[:] = nova_fila
                 heapq.heapify(fila)
 
@@ -523,8 +596,11 @@ class _Busca:
             lb = ch >> 48
             sid = ch & MASK_ID
 
+            # O menor nó da fila define o lower bound global válido da busca
+            self._registrar_lb_global(min(lb, self.ub))
+
             if lb >= self.ub:
-                c["podados_limite"] += 1
+                self._registrar_poda_limite(arr_k[sid], arr_cont[sid])
                 arr_pi[sid] = None
                 livres.append(sid)
                 continue
@@ -574,10 +650,16 @@ class _Busca:
             arr_pi[sid] = None
             livres.append(sid)
 
-            if len(fila) > c["max_fila"]:
-                c["max_fila"] = len(fila)
-                if len(fila) > self.max_fila:
-                    raise _Interrompido("memoria_esgotada")
+            # Atualiza o pico da fila (considerando o momento imediatamente antes
+            # ou depois da expansão; antes do pop o tamanho era len(fila) + 1 - len(filhos))
+            pico_iteracao = max(len(fila), len(fila) + 1 - len(filhos))
+            if pico_iteracao > c["max_fila"]:
+                c["max_fila"] = pico_iteracao
+            if len(fila) > self.max_fila:
+                raise _Interrompido("memoria_esgotada")
+
+        # Fila esvaziada: prova de otimalidade concluída (LB == UB)
+        self._registrar_lb_global(self.ub)
 
 
 # ---------------------------------------------------------------------------
@@ -619,7 +701,7 @@ def branch_and_bound(
     -------
     dict
         Status, melhor tour/custo, lower bound da raiz, contadores,
-        tempos e, opcionalmente, pico de memória.
+        tempos, trajetórias (UB, LB raiz e LB global) e pico de memória.
     """
     D = np.asarray(D)
     n = D.shape[0]
@@ -639,7 +721,7 @@ def branch_and_bound(
         "tour_inicial deve ser uma permutação dos vértices."
     )
 
-    ub0 = custo_tour(D, tour_inicial)
+    ub0 = int(custo_tour(D, tour_inicial))
 
     if n <= 3:
         return dict(
@@ -649,6 +731,25 @@ def branch_and_bound(
             ub_inicial=ub0,
             lb_raiz=ub0,
             n=n,
+            estrategia=estrategia,
+            gerados=1,
+            expandidos=0,
+            podados_limite=0,
+            podados_simetria=0,
+            folhas_eliminadas_limite=0,
+            fracao_folhas_podadas=0.0,
+            folhas=1,
+            melhorias_ub=0,
+            prof_max=n,
+            max_fila=1,
+            tempo_preprocessamento=0.0,
+            tempo_busca=0.0,
+            tempo_ate_melhor=0.0,
+            nos_por_s=0.0,
+            mem_pico=0 if medir_memoria else None,
+            trajetoria_ub=[[0, 0.0, ub0]],
+            trajetoria_lb_raiz=[[0, 0.0, ub0]],
+            trajetoria_lb=[[0, 0.0, ub0]],
         )
 
     ligou_aqui = medir_memoria and not tracemalloc.is_tracing()
@@ -678,6 +779,9 @@ def branch_and_bound(
                 busca.melhor(lb_raiz, pi_raiz)
             else:
                 raise ValueError(f"Estratégia desconhecida: {estrategia}")
+        else:
+            # Provado ótimo já na raiz sem expandir nós
+            busca._registrar_lb_global(busca.ub)
     except _Interrompido as e:
         status = e.status
 
@@ -692,9 +796,15 @@ def branch_and_bound(
         if ligou_aqui:
             tracemalloc.stop()
 
-    custo = custo_tour(D, busca.tour_ub)
+    custo = int(custo_tour(D, busca.tour_ub))
 
     assert custo == busca.ub, "Custo do melhor tour diverge do UB."
+
+    total_folhas_validas = math.factorial(n - 1) // 2
+    fracao_folhas_podadas = (
+        busca.c["folhas_eliminadas_limite"] / total_folhas_validas
+        if total_folhas_validas > 0 else 0.0
+    )
 
     return dict(
         status=status,
@@ -705,6 +815,7 @@ def branch_and_bound(
         ub_inicial=ub0,
         lb_raiz=lb_raiz,
         **busca.c,
+        fracao_folhas_podadas=fracao_folhas_podadas,
         tempo_preprocessamento=tempo_pre,
         tempo_busca=tempo_busca,
         tempo_ate_melhor=busca.tempo_ate_melhor,
@@ -713,4 +824,7 @@ def branch_and_bound(
             if tempo_busca > 0 else 0.0
         ),
         mem_pico=mem_pico,
+        trajetoria_ub=busca.trajetoria_ub,
+        trajetoria_lb_raiz=busca.trajetoria_lb_raiz,
+        trajetoria_lb=busca.trajetoria_lb,
     )

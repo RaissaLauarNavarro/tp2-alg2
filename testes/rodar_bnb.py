@@ -68,10 +68,11 @@ CAMPOS = [
     "confere_otimo_publicado", "gap_melhor_pct",
     "ub_inicial", "gap_ub_inicial_pct", "lb_raiz", "gap_lb_raiz_pct",
     "nos_gerados", "nos_expandidos", "nos_podados_limite", "nos_podados_simetria",
-    "folhas", "melhorias_ub", "prof_max", "max_fila",
+    "folhas", "folhas_eliminadas_limite", "fracao_folhas_podadas",
+    "melhorias_ub", "prof_max", "max_fila",
     "tempo_inicializacao_s", "tempo_preprocessamento_s", "tempo_busca_s",
     "tempo_total_s", "tempo_decorrido_s", "tempo_ate_melhor_s", "nos_por_s",
-    "mem_pico_bytes", "trajetoria_ub",
+    "mem_pico_bytes", "trajetoria_ub", "trajetoria_lb_raiz", "trajetoria_lb",
 ]
 
 
@@ -118,6 +119,8 @@ def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria):
         "nos_podados_limite": r.get("podados_limite", 0),
         "nos_podados_simetria": r.get("podados_simetria", 0),
         "folhas": r.get("folhas", 0),
+        "folhas_eliminadas_limite": r.get("folhas_eliminadas_limite", 0),
+        "fracao_folhas_podadas": round(r.get("fracao_folhas_podadas", 0.0), 6),
         "melhorias_ub": r.get("melhorias_ub", 0),
         "prof_max": r.get("prof_max", 0),
         "max_fila": r.get("max_fila", 0),
@@ -131,6 +134,10 @@ def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria):
         "mem_pico_bytes": r["mem_pico"] if r.get("mem_pico") is not None else "NA",
         # JSON: [[nós expandidos, segundos, custo], ...] a cada melhoria do UB
         "trajetoria_ub": json.dumps(r.get("trajetoria_ub", [])),
+        # JSON: [[iteração subgradiente, segundos, lb_int], ...] na raiz
+        "trajetoria_lb_raiz": json.dumps(r.get("trajetoria_lb_raiz", [])),
+        # JSON: [[nós expandidos, segundos, lb_global], ...] durante a busca
+        "trajetoria_lb": json.dumps(r.get("trajetoria_lb", [])),
     }
 
 
