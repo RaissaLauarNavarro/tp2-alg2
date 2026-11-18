@@ -780,6 +780,11 @@ def branch_and_bound(
             else:
                 raise ValueError(f"Estratégia desconhecida: {estrategia}")
         else:
+                    # A raiz inteira foi podada.
+            busca.c["podados_limite"] += 1
+            busca.c["folhas_eliminadas_limite"] += (
+                math.factorial(n - 1) // 2
+            )
             # Provado ótimo já na raiz sem expandir nós
             busca._registrar_lb_global(busca.ub)
     except _Interrompido as e:
