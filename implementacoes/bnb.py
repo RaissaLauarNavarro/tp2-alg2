@@ -448,7 +448,7 @@ class _Busca:
             self._ao_melhorar_ub()
 
     def _checar_tempo(self):
-        if (self.c["expandidos"] & 1023) == 0:
+        if (self.c["expandidos"] & 256) == 0:
             if time.perf_counter() > self.prazo:
                 raise _Interrompido("tempo_esgotado")
 
