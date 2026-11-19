@@ -7,12 +7,18 @@ Uso (a partir da pasta testes/; a pasta data/ fica em ../data e resultados em ..
     python rodar_bnb.py --estrategia melhor                  # best-first
     python rodar_bnb.py --nmax 40 --limite 1800
     python rodar_bnb.py --continuar                          # retoma um CSV parcial
+    python rodar_bnb.py --inicial fecho --fecho gift         # fecho por Gift Wrapping
     python rodar_bnb.py outra_pasta/ --saida ../resultados/outro.csv
 
 Inicialização do limite superior (--inicial):
     trivial       1 -> 2 -> ... -> n -> 1 (cold start)
     vizinho       Vizinho Mais Próximo a partir do vértice 1 (busca gulosa)
-    fecho         inserção mais barata a partir do fecho convexo
+    fecho         inserção mais barata a partir do fecho convexo; o algoritmo
+                  do fecho é escolhido com --fecho:
+                    graham  Varredura de Graham, O(n log n) (padrão)
+                    gift    Gift Wrapping, O(nh)
+                  Os dois devolvem o mesmo fecho, então o tour inicial, o UB e
+                  a árvore do B&B são os mesmos; só tempo_inicializacao_s muda.
     twice         Twice-around-the-tree
     christofides  Christofides
 Para adicionar outra estratégia, registre no dicionário INICIALIZACOES.
@@ -46,24 +52,25 @@ sys.path.insert(0, os.path.join(RAIZ_PROJETO, "implementacoes"))
 from bnb import branch_and_bound
 from bnb_guloso import tour_vizinho_mais_proximo
 from christofides import christofides
-from fecho_convexo import tour_fecho_convexo
+from fecho_convexo import ALGORITMOS_FECHO, tour_fecho_convexo
 from leitor_tsp import ler_instancia, listar_instancias
 from solucao_trivial import solucao_trivial
 from twice_around import twice_around_the_tree
 from utils import custo_tour
 
-# nome -> função Instancia -> tour. Para adicionar um warm-start, registre aqui.
-# Recebe a instância inteira (e não só D) porque o fecho convexo usa coordenadas.
+# nome -> função (Instancia, algoritmo do fecho) -> tour. Para adicionar um
+# warm-start, registre aqui. Recebe a instância inteira (e não só D) porque o
+# fecho convexo usa coordenadas; o segundo argumento só é usado pelo fecho.
 INICIALIZACOES = {
-    "trivial":      lambda inst: solucao_trivial(inst.D),                 # 1. cold start
-    "vizinho":      lambda inst: tour_vizinho_mais_proximo(inst.D, 0),    # 2. busca gulosa
-    "fecho":        lambda inst: tour_fecho_convexo(inst),                # 3. fecho convexo
-    "twice":        lambda inst: twice_around_the_tree(inst.D)[0],        # 4. 2-aproximado
-    "christofides": lambda inst: christofides(inst.D)[0],                 # 5. 1,5-aproximado
+    "trivial":      lambda inst, fecho: solucao_trivial(inst.D),                # 1. cold start
+    "vizinho":      lambda inst, fecho: tour_vizinho_mais_proximo(inst.D, 0),   # 2. busca gulosa
+    "fecho":        lambda inst, fecho: tour_fecho_convexo(inst, algoritmo=fecho),  # 3. fecho
+    "twice":        lambda inst, fecho: twice_around_the_tree(inst.D)[0],       # 4. 2-aproximado
+    "christofides": lambda inst, fecho: christofides(inst.D)[0],                # 5. 1,5-aproximado
 }
 
 CAMPOS = [
-    "instancia", "n", "tipo_peso", "inicial", "estrategia", "limite_s",
+    "instancia", "n", "tipo_peso", "inicial", "algoritmo_fecho", "estrategia", "limite_s",
     "status", "otimo_publicado", "custo_otimo", "melhor_custo",
     "confere_otimo_publicado", "gap_melhor_pct",
     "ub_inicial", "gap_ub_inicial_pct", "lb_raiz", "gap_lb_raiz_pct",
@@ -80,9 +87,10 @@ def pct(a, b):
     return round(100 * (a - b) / b, 4)
 
 
-def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria):
+def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria,
+            fecho="graham"):
     t0 = time.perf_counter()
-    tour0 = INICIALIZACOES[inicial](inst)
+    tour0 = INICIALIZACOES[inicial](inst, fecho)
     t_ini = time.perf_counter() - t0
 
     # o tempo da heurística conta dentro do limite de 30 min da execução
@@ -101,6 +109,7 @@ def avaliar(inst, inicial, estrategia, limite_s, max_fila, medir_memoria):
         "n": inst.n,
         "tipo_peso": inst.tipo_peso,
         "inicial": inicial,
+        "algoritmo_fecho": fecho if inicial == "fecho" else "",
         "estrategia": estrategia,
         "limite_s": limite_s,
         "status": r["status"],
@@ -146,6 +155,9 @@ def main():
     ap.add_argument("pasta", nargs="?", default=PASTA_DATA_PADRAO,
                     help="pasta com os .tsp/.tsp.gz (padrão: ../data)")
     ap.add_argument("--inicial", choices=sorted(INICIALIZACOES), default="trivial")
+    ap.add_argument("--fecho", choices=sorted(ALGORITMOS_FECHO), default=None,
+                    help="algoritmo do fecho convexo, só com --inicial fecho "
+                         "(graham = Varredura de Graham, padrão; gift = Gift Wrapping)")
     ap.add_argument("--estrategia", choices=["profundidade", "melhor"],
                     default="profundidade")
     ap.add_argument("--limite", type=float, default=1800.0,
@@ -162,8 +174,14 @@ def main():
                     help="acrescenta ao CSV existente, pulando instâncias já feitas")
     args = ap.parse_args()
 
+    if args.fecho is not None and args.inicial != "fecho":
+        ap.error("--fecho só vale com --inicial fecho")
+    fecho = args.fecho or "graham"
+
     sufixo = "_memoria" if args.memoria else ""
-    nome_arquivo = f"resultados_bnb_{args.inicial}_{args.estrategia}{sufixo}.csv"
+    # com o fecho, o algoritmo entra no nome: as rodadas Graham e Gift não se sobrescrevem
+    nome_inicial = f"fecho_{fecho}" if args.inicial == "fecho" else args.inicial
+    nome_arquivo = f"resultados_bnb_{nome_inicial}_{args.estrategia}{sufixo}.csv"
     saida = args.saida or os.path.join(PASTA_RESULTADOS_PADRAO, nome_arquivo)
     if not os.path.isdir(args.pasta):
         sys.exit(f"Pasta '{args.pasta}' não encontrada. Rode a partir de "
@@ -185,7 +203,7 @@ def main():
     else:
         modo = "w"
 
-    print(f"inicial={args.inicial}  estratégia={args.estrategia}  "
+    print(f"inicial={nome_inicial}  estratégia={args.estrategia}  "
           f"limite={args.limite:.0f}s  -> {saida}")
     print(f"{'instância':<11}{'n':>4}  {'status':<17}{'custo':>9}{'ótimo':>9}"
           f"{'UB0':>9}{'expandidos':>13}{'podados':>13}{'tempo':>10}")
@@ -209,7 +227,7 @@ def main():
                 continue
 
             r = avaliar(inst, args.inicial, args.estrategia, args.limite,
-                        args.max_fila, args.memoria)
+                        args.max_fila, args.memoria, fecho)
             w.writerow(r)
             f.flush()
             print(f"{r['instancia']:<11}{r['n']:>4}  {r['status']:<17}{r['melhor_custo']:>9}"
