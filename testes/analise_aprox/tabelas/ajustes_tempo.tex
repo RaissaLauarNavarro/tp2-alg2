@@ -1,0 +1,22 @@
+\begin{table}[ht]
+\centering
+\small
+\caption{Modelo de complexidade selecionado para o tempo de cada subrotina, ajustado como $t = a\,f(x) + c$ em escala log e escolhido pelo AICc; quando o IC 95\% do expoente livre $b$ (de $t = a x^b$) contém 0, reporta-se o modelo constante.}
+\label{tab:ajustes-tempo}
+\begin{tabular}{llcrrrc}
+\hline
+Algoritmo & Subrotina & Modelo & $R^2$ & $R^2_{\log}$ & RMSE (s) & $b$ [IC 95\%] \\
+\hline
+Twice-around-the-tree & Árvore geradora mínima & constante & -0.024 & 0.000 & 1.07e-04 & 0.22 [-0.21, 0.66] \\
+Twice-around-the-tree & Pré-ordem (DFS) & constante & -0.016 & 0.000 & 3.93e-06 & 0.19 [-0.15, 0.53] \\
+Twice-around-the-tree & Total & constante & -0.023 & 0.000 & 1.42e-04 & 0.13 [-0.30, 0.57] \\
+Christofides & Árvore geradora mínima & constante & -0.034 & 0.000 & 1.36e-04 & 0.25 [-0.27, 0.77] \\
+Christofides & Vértices ímpares & constante & -0.023 & 0.000 & 1.42e-05 & -0.01 [-0.46, 0.43] \\
+Christofides & Matching perfeito mínimo & $N^2$ & 0.857 & 0.888 & 1.94e-03 & 1.99 [1.52, 2.47] \\
+Christofides & Circuito euleriano & $N^3$ & 0.662 & 0.549 & 7.76e-06 & 0.44 [0.11, 0.77] \\
+Christofides & Atalhos & constante & -0.015 & 0.000 & 9.23e-07 & 0.18 [-0.15, 0.51] \\
+Christofides & Total & $N^2$ & 0.852 & 0.851 & 2.01e-03 & 1.65 [1.19, 2.12] \\
+Christofides & Matching perfeito mínimo (vs.\ $k$) & $k^2$ & 0.916 & 0.920 & 1.49e-03 & 1.72 [1.37, 2.07] \\
+\hline
+\end{tabular}
+\end{table}
