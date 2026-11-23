@@ -53,7 +53,7 @@ Base de dados com as métricas coletadas, em CSV. Para cada algoritmo há um arq
 Relatório no formato de artigo científico (modelo SBC):
 
 - `relatorio.pdf` – versão compilada;
-- `latex/` – código-fonte LaTeX e figuras;
+- `relatorio_latex.zip` – código-fonte LaTeX e figuras;
 - `historicos_llms` - links dos prompts de LLMS.
 
 ## Como executar
