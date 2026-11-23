@@ -19,7 +19,7 @@ Algoritmos implementados:
 ├── implementacoes/              # Código-fonte dos algoritmos
 ├── testes/                      # Scripts de execução e coleta de métricas
 ├── resultados/                  # Métricas coletadas (CSV)
-├── documentacao/                # Relatório: PDF e código-fonte LaTeX
+├── documentacao/                # Relatório: PDF, código-fonte LaTeX, links prompts LLMs
 ├── historicos_llms              # Link dos prompts LLMS
 └── README.md
 ```

@@ -1,4 +1,4 @@
-Links prompts claude:
+Links prompts LLMs:
 
 - https://claude.ai/share/03a0b0f8-3f63-4291-87e3-1a356077ad20
 - https://claude.ai/share/a43f5d76-da19-4edc-9cf3-3f9f4e1fddf4
