@@ -76,13 +76,14 @@ def vertices_grau_impar(n, arestas):
 def matching_perfeito_minimo(D, impares):
     """Matching perfeito de peso mínimo no subgrafo induzido por I.
 
-    O networkx só oferece Blossom para peso MÁXIMO. Fazemos a inversão
-    explicitamente, w'(u,v) = W + 1 - w(u,v), e exigimos cardinalidade máxima.
-    Num grafo completo com |I| par, cardinalidade máxima = matching perfeito,
-    e entre matchings perfeitos (todos com |I|/2 arestas):
+    Usa nx.min_weight_matching (NetworkX >= 3.0). Internamente, a função
+    inverte os pesos, w'(u,v) = W + 1 - w(u,v), e chama o Blossom de peso
+    máximo com maxcardinality=True. Num grafo completo com |I| par,
+    cardinalidade máxima = matching perfeito, e entre matchings perfeitos
+    (todos com |I|/2 arestas):
         max sum(W + 1 - w) = (|I|/2)(W + 1) - min sum(w).
-    Fazer isso à mão (em vez de nx.min_weight_matching) deixa a redução
-    auditável e não depende da semântica da função, que mudou entre versões.
+    Antes da 3.0 a função não exigia cardinalidade máxima, por isso a versão
+    é fixada e o resultado é verificado abaixo.
     """
     k = len(impares)
     if k == 0:
@@ -90,20 +91,19 @@ def matching_perfeito_minimo(D, impares):
     assert k % 2 == 0, "Lema do aperto de mãos: |I| deve ser par"
 
     # pesos como tipos nativos do Python (.item()) -> inteiros exatos na TSPLIB
-    W = max(D[impares[i], impares[j]].item()
-            for i in range(k) for j in range(i + 1, k))
-
     G = nx.Graph()
     for i in range(k):
         u = impares[i]
         for j in range(i + 1, k):
             v = impares[j]
-            G.add_edge(u, v, weight=W + 1 - D[u, v].item())
+            G.add_edge(u, v, weight=D[u, v].item())
 
-    M = nx.max_weight_matching(G, maxcardinality=True, weight="weight")
+    M = nx.min_weight_matching(G, weight="weight")
+
+    # auditoria: o matching precisa ser perfeito e cobrir exatamente I
     assert 2 * len(M) == k, "Matching retornado não é perfeito"
+    assert {x for e in M for x in e} == set(impares), "Matching não cobre I"
     return [(int(u), int(v)) for u, v in M]
-
 
 # ---------------------------------------------------------------------------
 # Passo 3: circuito euleriano no multigrafo T + M (Hierholzer via DFS)
